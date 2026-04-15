@@ -14,10 +14,9 @@ DerivedData/
 xcuserdata/
 *.moved-aside
 
-# Swift Package Manager
+# Swift Package Manager (build artifacts only — our source lives under Packages/ and IS tracked)
 .build/
 .swiftpm/
-Packages/
 Package.resolved
 
 # Sample backups (provenance noted in fixtures/MANIFEST.md)
