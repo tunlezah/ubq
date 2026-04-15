@@ -47,14 +47,12 @@ public struct BSONReader {
     @inline(__always)
     mutating func readInt32() throws -> Int32 {
         try requireBytes(4)
-        let start = data.startIndex + cursor
         let v: Int32 = data.withUnsafeBytes { buf in
             let p = buf.baseAddress!.advanced(by: cursor)
             var raw: Int32 = 0
             memcpy(&raw, p, 4)
             return Int32(littleEndian: raw)
         }
-        _ = start
         cursor += 4
         return v
     }

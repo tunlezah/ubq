@@ -1,0 +1,79 @@
+name: UnifiBackupInspector
+options:
+  bundleIdPrefix: com.tunlezah
+  deploymentTarget:
+    macOS: "15.0"
+  createIntermediateGroups: true
+  developmentLanguage: en
+  xcodeVersion: "16.0"
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    MACOSX_DEPLOYMENT_TARGET: "15.0"
+    ENABLE_USER_SCRIPT_SANDBOXING: "YES"
+    GENERATE_INFOPLIST_FILE: "NO"
+    CODE_SIGN_STYLE: Automatic
+    CODE_SIGNING_REQUIRED: "NO"
+    CODE_SIGN_IDENTITY: ""
+    CODE_SIGNING_ALLOWED: "NO"
+    ENABLE_HARDENED_RUNTIME: "YES"
+
+packages:
+  UniFiBackupKit:
+    path: ../Packages/UniFiBackupKit
+
+targets:
+  UnifiBackupInspector:
+    type: application
+    platform: macOS
+    sources:
+      - Sources
+    resources:
+      - Resources
+    info:
+      path: Resources/Info.plist
+      properties:
+        CFBundleName: UniFi Backup Inspector
+        CFBundleDisplayName: UniFi Backup Inspector
+        CFBundleIdentifier: com.tunlezah.unifibackupinspector
+        CFBundleShortVersionString: "1.0.0"
+        CFBundleVersion: "1"
+        CFBundlePackageType: APPL
+        CFBundleInfoDictionaryVersion: "6.0"
+        LSMinimumSystemVersion: "15.0"
+        LSApplicationCategoryType: public.app-category.developer-tools
+        NSHumanReadableCopyright: "Local-first. No telemetry. Reads UniFi .unf backups."
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: UniFi Network Backup
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Default
+            LSItemContentTypes:
+              - com.ubnt.unifi.network.backup
+            CFBundleTypeExtensions:
+              - unf
+        UTImportedTypeDeclarations:
+          - UTTypeIdentifier: com.ubnt.unifi.network.backup
+            UTTypeDescription: UniFi Network Backup
+            UTTypeConformsTo:
+              - public.data
+            UTTypeTagSpecification:
+              public.filename-extension:
+                - unf
+    entitlements:
+      path: Resources/UnifiBackupInspector.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.files.user-selected.read-write: true
+        com.apple.security.files.bookmarks.app-scope: true
+    dependencies:
+      - package: UniFiBackupKit
+        product: UniFiBackupKit
+    settings:
+      base:
+        INFOPLIST_FILE: Resources/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Resources/UnifiBackupInspector.entitlements
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "1"
+        PRODUCT_BUNDLE_IDENTIFIER: com.tunlezah.unifibackupinspector
