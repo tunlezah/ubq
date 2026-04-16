@@ -22,7 +22,12 @@ public enum UnfCipher {
             throw FatalBackupError.truncatedAtBlockBoundary(actual: ciphertext.count)
         }
 
-        var out = Data(count: ciphertext.count)
+        // Capture sizes locally so the inner closure doesn't alias a mutating
+        // access on `out` (Swift exclusivity: withUnsafeMutableBytes on `out`
+        // conflicts with reading `out.count` inside its closure body).
+        let ciphertextLen = ciphertext.count
+        let outLen = ciphertext.count
+        var out = Data(count: outLen)
         var moved = 0
         let status: CCCryptorStatus = out.withUnsafeMutableBytes { outBuf -> CCCryptorStatus in
             ciphertext.withUnsafeBytes { inBuf -> CCCryptorStatus in
@@ -32,8 +37,8 @@ public enum UnfCipher {
                     /* options: no padding */ 0,
                     key, key.count,
                     iv,
-                    inBuf.baseAddress, ciphertext.count,
-                    outBuf.baseAddress, out.count,
+                    inBuf.baseAddress, ciphertextLen,
+                    outBuf.baseAddress, outLen,
                     &moved
                 )
             }
@@ -59,7 +64,9 @@ public enum UnfCipher {
         guard plaintext.count % kCCBlockSizeAES128 == 0 else {
             throw FatalBackupError.truncatedAtBlockBoundary(actual: plaintext.count)
         }
-        var out = Data(count: plaintext.count)
+        let plaintextLen = plaintext.count
+        let outLen = plaintext.count
+        var out = Data(count: outLen)
         var moved = 0
         let status: CCCryptorStatus = out.withUnsafeMutableBytes { outBuf -> CCCryptorStatus in
             plaintext.withUnsafeBytes { inBuf -> CCCryptorStatus in
@@ -69,8 +76,8 @@ public enum UnfCipher {
                     0,
                     key, key.count,
                     iv,
-                    inBuf.baseAddress, plaintext.count,
-                    outBuf.baseAddress, out.count,
+                    inBuf.baseAddress, plaintextLen,
+                    outBuf.baseAddress, outLen,
                     &moved
                 )
             }
