@@ -89,7 +89,7 @@ public struct TolerantZipReader {
                 // CRC and sizes follow the compressed data. We must scan forward
                 // to find the data descriptor (optional signature 0x08074b50)
                 // *or* the next local file header / central directory entry.
-                guard let found = findEndOfDeflatedPayload(
+                guard let found = Self.findEndOfDeflatedPayload(
                     in: base,
                     from: dataStart
                 ) else {
@@ -131,7 +131,7 @@ public struct TolerantZipReader {
                 case 0:
                     decoded = payload
                 case 8:
-                    decoded = try inflateRaw(payload, estimatedSize: uncompSize)
+                    decoded = try Self.inflateRaw(payload, estimatedSize: uncompSize)
                 default:
                     diags.append(
                         Diagnostic(
