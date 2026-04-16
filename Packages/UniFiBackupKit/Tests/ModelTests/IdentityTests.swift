@@ -11,12 +11,12 @@ final class IdentityTests: XCTestCase {
         XCTAssertEqual(v, "9.5.21")
     }
 
-    func testTimestampEpochMs() {
+    func testTimestampEpochMs() throws {
         let data = Data("1700000000000".utf8)
         let sink = DiagnosticSink()
         let d = Identity.parseTimestamp(data, diagnostics: sink)
-        XCTAssertNotNil(d)
-        XCTAssertEqual(d?.timeIntervalSince1970, 1_700_000_000, accuracy: 0.001)
+        let unwrapped = try XCTUnwrap(d)
+        XCTAssertEqual(unwrapped.timeIntervalSince1970, 1_700_000_000, accuracy: 0.001)
     }
 
     func testTimestampISO() {
