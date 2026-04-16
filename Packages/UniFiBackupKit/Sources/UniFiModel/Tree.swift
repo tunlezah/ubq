@@ -130,6 +130,14 @@ public struct CategoryNode: Hashable, Sendable {
     public let symbolName: String
     public let badge: Int?
     public var children: [TreeNode]
+
+    public init(id: String, title: String, symbolName: String, badge: Int?, children: [TreeNode]) {
+        self.id = id
+        self.title = title
+        self.symbolName = symbolName
+        self.badge = badge
+        self.children = children
+    }
 }
 
 public struct SiteNode: Hashable, Sendable {
@@ -137,6 +145,13 @@ public struct SiteNode: Hashable, Sendable {
     public let title: String
     public let raw: BSONDocument?
     public var children: [TreeNode]
+
+    public init(id: String, title: String, raw: BSONDocument?, children: [TreeNode]) {
+        self.id = id
+        self.title = title
+        self.raw = raw
+        self.children = children
+    }
 }
 
 public struct SiteChildCategory: Hashable, Sendable {
@@ -168,25 +183,73 @@ public struct SiteChildCategory: Hashable, Sendable {
     public let siteId: String
     public let kind: Kind
     public var children: [TreeNode]
+
+    public init(siteId: String, kind: Kind, children: [TreeNode]) {
+        self.siteId = siteId
+        self.kind = kind
+        self.children = children
+    }
 }
 
-public struct DeviceNode: Hashable, Sendable { public let id: String; public let title: String; public let raw: BSONDocument? }
-public struct WlanGroupNode: Hashable, Sendable { public let id: String; public let title: String; public var children: [TreeNode] }
-public struct WlanNode: Hashable, Sendable { public let id: String; public let title: String; public let raw: BSONDocument? }
-public struct NetworkNode: Hashable, Sendable { public let id: String; public let title: String; public let raw: BSONDocument? }
-public struct FirewallGroupNode: Hashable, Sendable { public let id: String; public let title: String; public let raw: BSONDocument? }
-public struct FirewallRuleNode: Hashable, Sendable { public let id: String; public let title: String; public let raw: BSONDocument? }
-public struct PortForwardNode: Hashable, Sendable { public let id: String; public let title: String; public let raw: BSONDocument? }
-public struct PortProfileNode: Hashable, Sendable { public let id: String; public let title: String; public let raw: BSONDocument? }
-public struct RoutingNode: Hashable, Sendable { public let id: String; public let title: String; public let raw: BSONDocument? }
-public struct ClientNode: Hashable, Sendable { public let id: String; public let title: String; public let raw: BSONDocument? }
-public struct AdminNode: Hashable, Sendable { public let id: String; public let title: String; public let raw: BSONDocument? }
-public struct AccountNode: Hashable, Sendable { public let id: String; public let title: String; public let raw: BSONDocument? }
-public struct RadiusNode: Hashable, Sendable { public let id: String; public let title: String; public let raw: BSONDocument? }
-public struct HotspotOpNode: Hashable, Sendable { public let id: String; public let title: String; public let raw: BSONDocument? }
-public struct SettingNode: Hashable, Sendable { public let id: String; public let title: String; public let raw: BSONDocument? }
-public struct OpaqueCollectionNode: Hashable, Sendable { public let name: String; public var children: [TreeNode] }
-public struct OpaqueRecordNode: Hashable, Sendable { public let id: String; public let title: String; public let parentCollection: String; public let raw: BSONDocument }
+/// Simple leaf node for a record that has a raw backing document.
+public struct RecordNode: Hashable, Sendable {
+    public let id: String
+    public let title: String
+    public let raw: BSONDocument?
+    public init(id: String, title: String, raw: BSONDocument?) {
+        self.id = id
+        self.title = title
+        self.raw = raw
+    }
+}
+
+public typealias DeviceNode = RecordNode
+public typealias WlanNode = RecordNode
+public typealias NetworkNode = RecordNode
+public typealias FirewallGroupNode = RecordNode
+public typealias FirewallRuleNode = RecordNode
+public typealias PortForwardNode = RecordNode
+public typealias PortProfileNode = RecordNode
+public typealias RoutingNode = RecordNode
+public typealias ClientNode = RecordNode
+public typealias AdminNode = RecordNode
+public typealias AccountNode = RecordNode
+public typealias RadiusNode = RecordNode
+public typealias HotspotOpNode = RecordNode
+public typealias SettingNode = RecordNode
+
+public struct WlanGroupNode: Hashable, Sendable {
+    public let id: String
+    public let title: String
+    public var children: [TreeNode]
+    public init(id: String, title: String, children: [TreeNode]) {
+        self.id = id
+        self.title = title
+        self.children = children
+    }
+}
+
+public struct OpaqueCollectionNode: Hashable, Sendable {
+    public let name: String
+    public var children: [TreeNode]
+    public init(name: String, children: [TreeNode]) {
+        self.name = name
+        self.children = children
+    }
+}
+
+public struct OpaqueRecordNode: Hashable, Sendable {
+    public let id: String
+    public let title: String
+    public let parentCollection: String
+    public let raw: BSONDocument
+    public init(id: String, title: String, parentCollection: String, raw: BSONDocument) {
+        self.id = id
+        self.title = title
+        self.parentCollection = parentCollection
+        self.raw = raw
+    }
+}
 
 /// Builds the top-level tree from a `MappedModel`.
 public enum TreeBuilder {
