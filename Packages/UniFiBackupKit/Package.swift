@@ -62,16 +62,16 @@ let package = Package(
         .target(name: "Export", dependencies: ["UniFiModel", "UniFiBSON", "Redaction"]),
 
         // Tests.
-        .testTarget(name: "UnfCryptoTests", dependencies: ["UnfCrypto"]),
+        .testTarget(name: "UnfCryptoTests", dependencies: ["UnfCrypto", "Diagnostics"]),
         .testTarget(name: "TolerantZipTests", dependencies: ["TolerantZip"]),
         .testTarget(name: "UniFiBSONTests", dependencies: ["UniFiBSON"]),
-        .testTarget(name: "BackupStreamTests", dependencies: ["BackupStream"]),
-        .testTarget(name: "ModelTests", dependencies: ["UniFiModel"]),
-        .testTarget(name: "RedactionTests", dependencies: ["Redaction", "Export"]),
-        .testTarget(name: "ExportTests", dependencies: ["Export", "UniFiModel"]),
+        .testTarget(name: "BackupStreamTests", dependencies: ["BackupStream", "UniFiBSON", "Diagnostics"]),
+        .testTarget(name: "ModelTests", dependencies: ["UniFiModel", "Diagnostics"]),
+        .testTarget(name: "RedactionTests", dependencies: ["Redaction", "Export", "UniFiBSON", "UniFiModel"]),
+        .testTarget(name: "ExportTests", dependencies: ["Export", "UniFiModel", "UniFiBSON"]),
         .testTarget(
             name: "IntegrationTests",
-            dependencies: ["UniFiBackupKit"],
+            dependencies: ["UniFiBackupKit", "UniFiBSON", "UnfCrypto"],
             resources: [
                 // No committed binary fixtures; synthetic .unf blobs are
                 // constructed programmatically at test time. Real-world
