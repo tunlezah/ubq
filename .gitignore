@@ -1,0 +1,37 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+
+# Xcode
+build/
+DerivedData/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+*.swp
+*.xcuserstate
+xcuserdata/
+*.moved-aside
+
+# Swift Package Manager (build artifacts only — our source lives under Packages/ and IS tracked)
+.build/
+.swiftpm/
+Package.resolved
+
+# Sample backups (provenance noted in fixtures/MANIFEST.md)
+fixtures/*
+!fixtures/MANIFEST.md
+!fixtures/synthetic/
+
+# IDE
+.vscode/
+.idea/
+
+# OS / scratch
+*.log
+*.tmp
+.tmp/
+
+# Sub-agent transcripts (local only)
+/tmp-agents/

@@ -1,0 +1,174 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-package:
+    name: Test UniFiBackupKit (swift test)
+    runs-on: macos-14
+    defaults:
+      run:
+        working-directory: Packages/UniFiBackupKit
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.app || sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Swift version
+        run: swift --version
+
+      - name: Resolve and build (debug)
+        run: swift build -v
+
+      - name: Run package tests
+        run: swift test -v
+
+  build-app:
+    name: Build + archive UnifiBackupInspector.app
+    runs-on: macos-14
+    needs: test-package
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.app || sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        working-directory: App
+        run: xcodegen generate
+
+      - name: Show derived project structure
+        working-directory: App
+        run: ls -al UnifiBackupInspector.xcodeproj || true
+
+      - name: Build (Release, unsigned)
+        working-directory: App
+        run: |
+          xcodebuild \
+            -project UnifiBackupInspector.xcodeproj \
+            -scheme UnifiBackupInspector \
+            -configuration Release \
+            -destination 'platform=macOS,arch=arm64' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            clean build \
+            | xcpretty || true
+
+      - name: Locate built app
+        id: locate
+        working-directory: App
+        run: |
+          APP_PATH=$(find build/Build/Products/Release -maxdepth 2 -name "UnifiBackupInspector.app" -type d | head -n 1)
+          if [ -z "$APP_PATH" ]; then
+            echo "Could not locate the built .app. Dumping tree:" >&2
+            find build -maxdepth 6 -type d >&2 || true
+            exit 1
+          fi
+          echo "app_path=$APP_PATH" >> "$GITHUB_OUTPUT"
+          echo "Found app: $APP_PATH"
+
+      - name: Package as .dmg
+        working-directory: App
+        run: |
+          APP_PATH="${{ steps.locate.outputs.app_path }}"
+          mkdir -p dist/dmg_staging
+          cp -R "$APP_PATH" dist/dmg_staging/
+          ln -s /Applications dist/dmg_staging/Applications || true
+          hdiutil create \
+            -volname "UniFi Backup Inspector" \
+            -srcfolder dist/dmg_staging \
+            -ov \
+            -format UDZO \
+            dist/UnifiBackupInspector.dmg
+
+      - name: Upload artifact (.dmg)
+        uses: actions/upload-artifact@v4
+        with:
+          name: UnifiBackupInspector-dmg
+          path: App/dist/UnifiBackupInspector.dmg
+          if-no-files-found: error
+
+      - name: Upload artifact (.app zipped)
+        working-directory: App
+        run: |
+          APP_PATH="${{ steps.locate.outputs.app_path }}"
+          cd "$(dirname "$APP_PATH")"
+          zip -r "$GITHUB_WORKSPACE/App/dist/UnifiBackupInspector.zip" "$(basename "$APP_PATH")"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UnifiBackupInspector-app-zip
+          path: App/dist/UnifiBackupInspector.zip
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    runs-on: macos-14
+    needs: build-app
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download .dmg
+        uses: actions/download-artifact@v4
+        with:
+          name: UnifiBackupInspector-dmg
+          path: release
+
+      - name: Download .zip
+        uses: actions/download-artifact@v4
+        with:
+          name: UnifiBackupInspector-app-zip
+          path: release
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            release/UnifiBackupInspector.dmg
+            release/UnifiBackupInspector.zip
+          body: |
+            UniFi Backup Inspector ${{ github.ref_name }} — unsigned build.
+
+            ### First-launch instructions (unsigned binary)
+
+            macOS Gatekeeper will refuse to open this app by default because it
+            is not signed with an Apple Developer ID. After downloading:
+
+            1. **Drag** `UnifiBackupInspector.app` into `/Applications`.
+            2. In Finder, **right-click** the app and choose **Open**.
+               Confirm the dialog. macOS will remember the exception.
+
+            Or, from a terminal:
+
+            ```sh
+            xattr -d com.apple.quarantine /Applications/UnifiBackupInspector.app
+            open /Applications/UnifiBackupInspector.app
+            ```
+
+            ### What's inside
+
+            - `UnifiBackupInspector.dmg` — drag-install disk image.
+            - `UnifiBackupInspector.zip` — zipped `.app` bundle, same binary.
