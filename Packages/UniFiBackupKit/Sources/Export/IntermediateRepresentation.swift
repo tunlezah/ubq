@@ -9,15 +9,22 @@ import Redaction
 /// shows up we add one renderer; the IR stays stable.
 public struct IntermediateRepresentation: Sendable {
     public struct Section: Sendable {
-        public let tag: String            // "site", "device", "wlan", ...
+        public let tag: String
         public let title: String
-        public let fields: [(String, String)]  // pretty key-value pairs
-        public let rawJSON: String?       // pretty-printed JSON of the raw BSON doc
+        public let fields: [(String, String)]
+        public let rawJSON: String?
         public let children: [Section]
+        public init(tag: String, title: String, fields: [(String, String)], rawJSON: String?, children: [Section]) {
+            self.tag = tag; self.title = title; self.fields = fields; self.rawJSON = rawJSON; self.children = children
+        }
     }
 
     public let header: Header
     public let sections: [Section]
+
+    public init(header: Header, sections: [Section]) {
+        self.header = header; self.sections = sections
+    }
 
     public struct Header: Sendable {
         public let version: String?
@@ -28,6 +35,9 @@ public struct IntermediateRepresentation: Sendable {
         public let redacted: Bool
         public let selectionCount: Int
         public let producedBy: String
+        public init(version: String?, format: String?, timestamp: Date?, origin: Identity.Origin?, kind: Identity.Kind?, redacted: Bool, selectionCount: Int, producedBy: String) {
+            self.version = version; self.format = format; self.timestamp = timestamp; self.origin = origin; self.kind = kind; self.redacted = redacted; self.selectionCount = selectionCount; self.producedBy = producedBy
+        }
     }
 
     public static func from(

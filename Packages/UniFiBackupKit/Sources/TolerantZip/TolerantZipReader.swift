@@ -17,6 +17,7 @@ public struct TolerantZipReader {
     public struct Entry: Sendable {
         public let name: String
         public let data: Data
+        public init(name: String, data: Data) { self.name = name; self.data = data }
     }
 
     public let entries: [String: Entry]

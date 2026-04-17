@@ -15,6 +15,9 @@ public struct Site: Sendable, Hashable {
     public let attrHiddenId: String?
     public let attrNoDelete: Bool?
     public let rawDocument: BSONDocument
+    public init(id: String, name: String, desc: String?, attrHiddenId: String?, attrNoDelete: Bool?, rawDocument: BSONDocument) {
+        self.id = id; self.name = name; self.desc = desc; self.attrHiddenId = attrHiddenId; self.attrNoDelete = attrNoDelete; self.rawDocument = rawDocument
+    }
 }
 
 public struct Device: Sendable, Hashable {
@@ -28,6 +31,9 @@ public struct Device: Sendable, Hashable {
     public let adopted: Bool?
     public let serial: String?
     public let rawDocument: BSONDocument
+    public init(id: String, siteId: String?, mac: String?, name: String?, model: String?, type: String?, version: String?, adopted: Bool?, serial: String?, rawDocument: BSONDocument) {
+        self.id = id; self.siteId = siteId; self.mac = mac; self.name = name; self.model = model; self.type = type; self.version = version; self.adopted = adopted; self.serial = serial; self.rawDocument = rawDocument
+    }
 }
 
 public struct Client: Sendable, Hashable {
@@ -43,12 +49,15 @@ public struct Client: Sendable, Hashable {
     public let usergroupId: String?
     public let networkId: String?
     public let rawDocument: BSONDocument
+    public init(id: String, siteId: String?, mac: String?, hostname: String?, name: String?, isGuest: Bool?, isWired: Bool?, noted: Bool?, fixedIp: String?, usergroupId: String?, networkId: String?, rawDocument: BSONDocument) {
+        self.id = id; self.siteId = siteId; self.mac = mac; self.hostname = hostname; self.name = name; self.isGuest = isGuest; self.isWired = isWired; self.noted = noted; self.fixedIp = fixedIp; self.usergroupId = usergroupId; self.networkId = networkId; self.rawDocument = rawDocument
+    }
 }
 
 public struct Wlan: Sendable, Hashable {
     public let id: String
     public let siteId: String?
-    public let name: String?       // SSID
+    public let name: String?
     public let security: String?
     public let wpaMode: String?
     public let vlan: Int32?
@@ -56,8 +65,11 @@ public struct Wlan: Sendable, Hashable {
     public let isGuest: Bool?
     public let wlangroupId: String?
     public let usergroupId: String?
-    public let passphrase: String? // x_passphrase — secret
+    public let passphrase: String?
     public let rawDocument: BSONDocument
+    public init(id: String, siteId: String?, name: String?, security: String?, wpaMode: String?, vlan: Int32?, enabled: Bool?, isGuest: Bool?, wlangroupId: String?, usergroupId: String?, passphrase: String?, rawDocument: BSONDocument) {
+        self.id = id; self.siteId = siteId; self.name = name; self.security = security; self.wpaMode = wpaMode; self.vlan = vlan; self.enabled = enabled; self.isGuest = isGuest; self.wlangroupId = wlangroupId; self.usergroupId = usergroupId; self.passphrase = passphrase; self.rawDocument = rawDocument
+    }
 }
 
 public struct WlanGroup: Sendable, Hashable {
@@ -65,6 +77,9 @@ public struct WlanGroup: Sendable, Hashable {
     public let siteId: String?
     public let name: String?
     public let rawDocument: BSONDocument
+    public init(id: String, siteId: String?, name: String?, rawDocument: BSONDocument) {
+        self.id = id; self.siteId = siteId; self.name = name; self.rawDocument = rawDocument
+    }
 }
 
 public struct Network: Sendable, Hashable {
@@ -77,6 +92,9 @@ public struct Network: Sendable, Hashable {
     public let domainName: String?
     public let isNat: Bool?
     public let rawDocument: BSONDocument
+    public init(id: String, siteId: String?, name: String?, purpose: String?, vlan: Int32?, ipSubnet: String?, domainName: String?, isNat: Bool?, rawDocument: BSONDocument) {
+        self.id = id; self.siteId = siteId; self.name = name; self.purpose = purpose; self.vlan = vlan; self.ipSubnet = ipSubnet; self.domainName = domainName; self.isNat = isNat; self.rawDocument = rawDocument
+    }
 }
 
 public struct PortProfile: Sendable, Hashable {
@@ -87,6 +105,9 @@ public struct PortProfile: Sendable, Hashable {
     public let forward: String?
     public let poeMode: String?
     public let rawDocument: BSONDocument
+    public init(id: String, siteId: String?, name: String?, nativeNetworkId: String?, forward: String?, poeMode: String?, rawDocument: BSONDocument) {
+        self.id = id; self.siteId = siteId; self.name = name; self.nativeNetworkId = nativeNetworkId; self.forward = forward; self.poeMode = poeMode; self.rawDocument = rawDocument
+    }
 }
 
 public struct PortForward: Sendable, Hashable {
@@ -100,6 +121,9 @@ public struct PortForward: Sendable, Hashable {
     public let fwdPort: String?
     public let enabled: Bool?
     public let rawDocument: BSONDocument
+    public init(id: String, siteId: String?, name: String?, fwd: String?, src: String?, proto: String?, dstPort: String?, fwdPort: String?, enabled: Bool?, rawDocument: BSONDocument) {
+        self.id = id; self.siteId = siteId; self.name = name; self.fwd = fwd; self.src = src; self.proto = proto; self.dstPort = dstPort; self.fwdPort = fwdPort; self.enabled = enabled; self.rawDocument = rawDocument
+    }
 }
 
 public struct FirewallRule: Sendable, Hashable {
@@ -112,6 +136,9 @@ public struct FirewallRule: Sendable, Hashable {
     public let proto: String?
     public let enabled: Bool?
     public let rawDocument: BSONDocument
+    public init(id: String, siteId: String?, name: String?, ruleset: String?, ruleIndex: Int32?, action: String?, proto: String?, enabled: Bool?, rawDocument: BSONDocument) {
+        self.id = id; self.siteId = siteId; self.name = name; self.ruleset = ruleset; self.ruleIndex = ruleIndex; self.action = action; self.proto = proto; self.enabled = enabled; self.rawDocument = rawDocument
+    }
 }
 
 public struct FirewallGroup: Sendable, Hashable {
@@ -121,6 +148,9 @@ public struct FirewallGroup: Sendable, Hashable {
     public let groupType: String?
     public let groupMembers: [String]
     public let rawDocument: BSONDocument
+    public init(id: String, siteId: String?, name: String?, groupType: String?, groupMembers: [String], rawDocument: BSONDocument) {
+        self.id = id; self.siteId = siteId; self.name = name; self.groupType = groupType; self.groupMembers = groupMembers; self.rawDocument = rawDocument
+    }
 }
 
 public struct RoutingEntry: Sendable, Hashable {
@@ -129,6 +159,9 @@ public struct RoutingEntry: Sendable, Hashable {
     public let name: String?
     public let enabled: Bool?
     public let rawDocument: BSONDocument
+    public init(id: String, siteId: String?, name: String?, enabled: Bool?, rawDocument: BSONDocument) {
+        self.id = id; self.siteId = siteId; self.name = name; self.enabled = enabled; self.rawDocument = rawDocument
+    }
 }
 
 public struct Admin: Sendable, Hashable {
@@ -137,7 +170,10 @@ public struct Admin: Sendable, Hashable {
     public let email: String?
     public let lastSiteName: String?
     public let timeCreated: Date?
-    public let rawDocument: BSONDocument       // contains x_shadow — secret
+    public let rawDocument: BSONDocument
+    public init(id: String, name: String?, email: String?, lastSiteName: String?, timeCreated: Date?, rawDocument: BSONDocument) {
+        self.id = id; self.name = name; self.email = email; self.lastSiteName = lastSiteName; self.timeCreated = timeCreated; self.rawDocument = rawDocument
+    }
 }
 
 public struct Account: Sendable, Hashable {
@@ -146,21 +182,30 @@ public struct Account: Sendable, Hashable {
     public let name: String?
     public let vlan: Int32?
     public let tunnelType: String?
-    public let rawDocument: BSONDocument       // contains x_password — secret
+    public let rawDocument: BSONDocument
+    public init(id: String, siteId: String?, name: String?, vlan: Int32?, tunnelType: String?, rawDocument: BSONDocument) {
+        self.id = id; self.siteId = siteId; self.name = name; self.vlan = vlan; self.tunnelType = tunnelType; self.rawDocument = rawDocument
+    }
 }
 
 public struct RadiusProfile: Sendable, Hashable {
     public let id: String
     public let siteId: String?
     public let name: String?
-    public let rawDocument: BSONDocument       // auth_servers contain shared secrets
+    public let rawDocument: BSONDocument
+    public init(id: String, siteId: String?, name: String?, rawDocument: BSONDocument) {
+        self.id = id; self.siteId = siteId; self.name = name; self.rawDocument = rawDocument
+    }
 }
 
 public struct HotspotOperator: Sendable, Hashable {
     public let id: String
     public let siteId: String?
     public let name: String?
-    public let rawDocument: BSONDocument       // x_password — secret
+    public let rawDocument: BSONDocument
+    public init(id: String, siteId: String?, name: String?, rawDocument: BSONDocument) {
+        self.id = id; self.siteId = siteId; self.name = name; self.rawDocument = rawDocument
+    }
 }
 
 public struct SettingPanel: Sendable, Hashable {
@@ -168,24 +213,28 @@ public struct SettingPanel: Sendable, Hashable {
     public let siteId: String?
     public let key: String?
     public let rawDocument: BSONDocument
+    public init(id: String, siteId: String?, key: String?, rawDocument: BSONDocument) {
+        self.id = id; self.siteId = siteId; self.key = key; self.rawDocument = rawDocument
+    }
 }
 
-/// Fallback record for every collection we haven't strongly-typed. Preserves
-/// everything verbatim.
 public struct OpaqueRecord: Sendable, Hashable {
     public let id: String
     public let rawDocument: BSONDocument
+    public init(id: String, rawDocument: BSONDocument) {
+        self.id = id; self.rawDocument = rawDocument
+    }
 }
 
-/// Fallback for whole collections we don't recognise.
 public struct OpaqueCollection: Sendable, Hashable {
     public let name: String
     public let records: [OpaqueRecord]
+    public init(name: String, records: [OpaqueRecord]) {
+        self.name = name; self.records = records
+    }
 }
 
-// Helpers to extract common fields.
 extension BSONDocument {
-    /// `_id` as a hex string, or empty if missing / unexpected type.
     public var idString: String {
         switch self["_id"] {
         case .some(.objectId(let oid)): return oid.hexString
