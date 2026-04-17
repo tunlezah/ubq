@@ -15,7 +15,7 @@ final class EndToEndTests: XCTestCase {
 
         // Identity
         XCTAssertEqual(backup.identity.version, "9.5.21")
-        XCTAssertEqual(backup.identity.format, 8)
+        XCTAssertEqual(backup.identity.format, "8")
         XCTAssertEqual(backup.identity.kind, .full)
 
         // Model

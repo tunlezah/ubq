@@ -21,7 +21,7 @@ public struct IntermediateRepresentation: Sendable {
 
     public struct Header: Sendable {
         public let version: String?
-        public let format: Int?
+        public let format: String?
         public let timestamp: Date?
         public let origin: Identity.Origin?
         public let kind: Identity.Kind?

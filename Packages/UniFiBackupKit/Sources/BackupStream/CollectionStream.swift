@@ -5,10 +5,22 @@ import Diagnostics
 /// Walks the concatenated BSON stream emitted by UniFi inside `db.gz` /
 /// `db_stat.gz`.
 ///
-/// The stream is a sequence of BSON documents. Every time a document with the
-/// single field `collection` is seen, subsequent documents belong to that
-/// logical collection. The very first document in `db.gz` is always such a
-/// marker.
+/// The stream is a sequence of BSON documents. The exact shape of
+/// "collection marker" documents varies between controller versions and third-
+/// party re-implementations describe it inconsistently. Our strategy:
+///
+/// * Look for documents whose shape strongly implies they are namespace
+///   headers: tiny docs (≤4 fields) carrying fields like `collection`, `ns`,
+///   `{db, collection}`, or `{namespace}` — any of which give us a new active
+///   collection name.
+/// * Anything else we emit under whatever collection is currently active.
+/// * Records that appear before any identifiable marker are **not** dropped:
+///   they are bucketed into a synthetic collection (`_uncategorized`) so the
+///   UI can still show them. Surfacing data beats silently losing it.
+/// * On the very first handful of "orphan" documents, we emit a sampling
+///   diagnostic that dumps the document's keyset — this tells us (and the
+///   user) what the real marker shape in their controller version looks like,
+///   so the heuristic can be tightened in a follow-up.
 public struct CollectionStream {
     public struct Record: Sendable {
         public let collection: String
@@ -20,10 +32,9 @@ public struct CollectionStream {
         public var orderedCollectionNames: [String]
     }
 
-    /// Reads the whole stream into memory, organised by collection.
-    ///
-    /// For `db_stat.gz` (potentially hundreds of MB) prefer
-    /// `forEach(_:diagnostics:)` to stream one record at a time.
+    /// Bucket name used when no collection marker has been identified yet.
+    public static let uncategorisedCollection = "_uncategorized"
+
     public static func readAll(
         _ data: Data,
         diagnostics: DiagnosticSink
@@ -42,8 +53,6 @@ public struct CollectionStream {
         return Output(recordsByCollection: recordsByCollection, orderedCollectionNames: order)
     }
 
-    /// Streams one record at a time. Errors emitted as diagnostics; the stream
-    /// continues after attempting to resync.
     public static func forEach(
         _ data: Data,
         diagnostics: DiagnosticSink,
@@ -52,24 +61,45 @@ public struct CollectionStream {
         var reader = BSONReader(data)
         var currentCollection: String? = nil
 
+        // Sampling: the first few documents' keysets tell us what the format
+        // actually looks like on this controller version. Cheap to emit, very
+        // useful when the marker heuristic misses.
+        var fingerprintsEmitted = 0
+        let fingerprintBudget = 8
+
         while !reader.isAtEnd {
             let docStart = reader.cursor
             do {
                 let doc = try reader.readDocument()
-                if isCollectionMarker(doc), let name = doc["collection"]?.stringValue {
+
+                if fingerprintsEmitted < fingerprintBudget {
+                    diagnostics.emit(
+                        .info,
+                        .other,
+                        "BSON doc @\(docStart): keys=\(doc.keys.prefix(8).joined(separator: ","))\(doc.keys.count > 8 ? ",…" : "")",
+                        offset: docStart
+                    )
+                    fingerprintsEmitted += 1
+                }
+
+                if let name = detectMarker(doc) {
                     currentCollection = name
-                } else {
-                    guard let coll = currentCollection else {
+                    continue
+                }
+
+                let coll = currentCollection ?? Self.uncategorisedCollection
+                if currentCollection == nil {
+                    // Only emit one such warning — don't flood diagnostics.
+                    if fingerprintsEmitted == 1 {
                         diagnostics.emit(
                             .warning,
                             .orphanedRecord,
-                            "Record at offset \(docStart) appeared before any collection marker; skipping.",
+                            "No collection marker recognised yet; records routed to '\(Self.uncategorisedCollection)'. First-doc keys logged above.",
                             offset: docStart
                         )
-                        continue
                     }
-                    handler(Record(collection: coll, document: doc))
                 }
+                handler(Record(collection: coll, document: doc))
             } catch let err as BSONParseError {
                 let message: String
                 switch err {
@@ -105,7 +135,32 @@ public struct CollectionStream {
         }
     }
 
-    private static func isCollectionMarker(_ doc: BSONDocument) -> Bool {
-        doc.count == 1 && doc.keys.first == "collection"
+    /// Returns a collection name if the document plausibly identifies one.
+    ///
+    /// Matches these shapes:
+    ///   * `{ collection: "name" }`
+    ///   * `{ db: "ace", collection: "name" }`
+    ///   * `{ ns: "ace.name" }`
+    ///   * `{ namespace: "ace.name" }`
+    ///
+    /// Only small header-style documents are considered (≤4 fields) — real
+    /// data records are not confused with markers.
+    public static func detectMarker(_ doc: BSONDocument) -> String? {
+        guard doc.count >= 1 && doc.count <= 4 else { return nil }
+
+        if let name = doc["collection"]?.stringValue, !name.isEmpty {
+            return name
+        }
+        if let ns = doc["ns"]?.stringValue, !ns.isEmpty {
+            return ns.split(separator: ".").dropFirst().joined(separator: ".").isEmpty
+                ? ns
+                : String(ns.split(separator: ".").dropFirst().joined(separator: "."))
+        }
+        if let ns = doc["namespace"]?.stringValue, !ns.isEmpty {
+            return ns.split(separator: ".").dropFirst().joined(separator: ".").isEmpty
+                ? ns
+                : String(ns.split(separator: ".").dropFirst().joined(separator: "."))
+        }
+        return nil
     }
 }
