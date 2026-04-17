@@ -69,6 +69,27 @@ final class EndToEndTests: XCTestCase {
         XCTAssertTrue(output.contains("UniFi Backup Export"))
     }
 
+    func testPerCollectionBSONFormat() throws {
+        let ciphertext = try SyntheticFixture.makePerCollectionBackup(
+            wlanSSID: "BsonFormatNet",
+            wlanPSK: "secret123"
+        )
+        let backup = try Backup.load(ciphertext: ciphertext)
+
+        XCTAssertEqual(backup.identity.version, "9.5.21")
+        XCTAssertEqual(backup.identity.format, "bson")
+
+        XCTAssertEqual(backup.model.sites.count, 1)
+        XCTAssertEqual(backup.model.sites.first?.name, "default")
+        XCTAssertEqual(backup.model.devices.count, 1)
+        XCTAssertEqual(backup.model.wlans.count, 1)
+        XCTAssertEqual(backup.model.wlans.first?.name, "BsonFormatNet")
+        XCTAssertEqual(backup.model.admins.count, 1)
+        XCTAssertEqual(backup.model.accounts.count, 1)
+
+        XCTAssertFalse(backup.tree.isEmpty)
+    }
+
     func testRejectsGarbageData() {
         let cipher = Data((0..<128).map { _ in UInt8.random(in: 0...255) })
         XCTAssertThrowsError(try Backup.load(ciphertext: cipher))
