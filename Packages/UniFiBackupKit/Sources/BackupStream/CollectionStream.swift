@@ -137,11 +137,12 @@ public struct CollectionStream {
 
     /// Returns a collection name if the document plausibly identifies one.
     ///
-    /// Matches these shapes:
-    ///   * `{ collection: "name" }`
-    ///   * `{ db: "ace", collection: "name" }`
-    ///   * `{ ns: "ace.name" }`
-    ///   * `{ namespace: "ace.name" }`
+    /// Known marker shapes in the wild:
+    ///   * `{ collection: "name" }`                           — most common
+    ///   * `{ __cmd: "select", collection: "name" }`          — some older controllers
+    ///   * `{ db: "ace", collection: "name" }`                — mongodump metadata
+    ///   * `{ ns: "ace.name" }`                               — mongo operation-log
+    ///   * `{ namespace: "ace.name" }`                        — alternate form
     ///
     /// Only small header-style documents are considered (≤4 fields) — real
     /// data records are not confused with markers.
@@ -152,14 +153,12 @@ public struct CollectionStream {
             return name
         }
         if let ns = doc["ns"]?.stringValue, !ns.isEmpty {
-            return ns.split(separator: ".").dropFirst().joined(separator: ".").isEmpty
-                ? ns
-                : String(ns.split(separator: ".").dropFirst().joined(separator: "."))
+            let afterDot = String(ns.split(separator: ".").dropFirst().joined(separator: "."))
+            return afterDot.isEmpty ? ns : afterDot
         }
         if let ns = doc["namespace"]?.stringValue, !ns.isEmpty {
-            return ns.split(separator: ".").dropFirst().joined(separator: ".").isEmpty
-                ? ns
-                : String(ns.split(separator: ".").dropFirst().joined(separator: "."))
+            let afterDot = String(ns.split(separator: ".").dropFirst().joined(separator: "."))
+            return afterDot.isEmpty ? ns : afterDot
         }
         return nil
     }
