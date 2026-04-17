@@ -90,7 +90,7 @@ final class ExportTests: XCTestCase {
     private func sampleIdentity() -> Identity {
         Identity(
             version: "9.5.21",
-            format: 8,
+            format: "8",
             timestamp: Date(timeIntervalSince1970: 1_700_000_000),
             kind: .full,
             origin: .selfHostedLinux

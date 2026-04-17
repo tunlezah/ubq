@@ -154,6 +154,82 @@ enum SyntheticFixture {
         return encrypted
     }
 
+    /// Produces a "format: bson" backup with per-collection .bson files.
+    static func makePerCollectionBackup(
+        siteName: String = "default",
+        siteDesc: String = "Default",
+        wlanSSID: String = "FixtureNet",
+        wlanPSK: String = "supersecret123"
+    ) throws -> Data {
+        let w = BSONWriter()
+        let siteId = makeObjectId(seed: 1)
+
+        func bsonFile(_ docs: [BSONDocument]) -> Data {
+            var stream = Data()
+            for d in docs { stream.append(w.write(d)) }
+            return stream
+        }
+
+        let siteDoc = document(with: [
+            ("_id", .objectId(siteId)),
+            ("name", .string(siteName)),
+            ("desc", .string(siteDesc)),
+        ])
+
+        let deviceDoc = document(with: [
+            ("_id", .objectId(makeObjectId(seed: 2))),
+            ("site_id", .objectId(siteId)),
+            ("mac", .string("aa:bb:cc:dd:ee:01")),
+            ("model", .string("U6ENT")),
+            ("type", .string("uap")),
+            ("adopted", .bool(true)),
+            ("name", .string("TestAP")),
+        ])
+
+        let wlanDoc = document(with: [
+            ("_id", .objectId(makeObjectId(seed: 3))),
+            ("site_id", .objectId(siteId)),
+            ("name", .string(wlanSSID)),
+            ("x_passphrase", .string(wlanPSK)),
+            ("security", .string("wpapsk")),
+            ("enabled", .bool(true)),
+        ])
+
+        let adminDoc = document(with: [
+            ("_id", .objectId(makeObjectId(seed: 5))),
+            ("name", .string("superadmin")),
+            ("email", .string("admin@example.com")),
+            ("x_shadow", .string("$6$rounds=5000$salt$fakeHash")),
+        ])
+
+        let accountDoc = document(with: [
+            ("_id", .objectId(makeObjectId(seed: 6))),
+            ("site_id", .objectId(siteId)),
+            ("name", .string("alice")),
+            ("x_password", .string("radius-secret")),
+        ])
+
+        var zipEntries: [(name: String, data: Data)] = [
+            ("version", Data("9.5.21\n".utf8)),
+            ("format", Data("bson".utf8)),
+            ("timestamp", Data("1713600000000".utf8)),
+            ("site.bson", bsonFile([siteDoc])),
+            ("device.bson", bsonFile([deviceDoc])),
+            ("wlanconf.bson", bsonFile([wlanDoc])),
+            ("admin.bson", bsonFile([adminDoc])),
+            ("account.bson", bsonFile([accountDoc])),
+        ]
+        _ = zipEntries // silence unused
+
+        let zipped = buildZip(entries: zipEntries)
+        var padded = zipped
+        let padLen = (16 - (padded.count % 16)) % 16
+        if padLen > 0 {
+            padded.append(Data(repeating: 0x00, count: padLen))
+        }
+        return try UnfCipher.encrypt(padded)
+    }
+
     private static func document(with pairs: [(String, BSONValue)]) -> BSONDocument {
         var d = BSONDocument()
         for (k, v) in pairs { d[k] = v }

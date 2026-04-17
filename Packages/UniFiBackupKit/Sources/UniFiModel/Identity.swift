@@ -24,14 +24,17 @@ public struct Identity: Hashable, Sendable, Codable {
     }
 
     public let version: String?
-    public let format: Int?
+    /// Raw contents of the `format` entry in the ZIP. Often an integer string
+    /// (e.g. `"7"`, `"8"`) on older controllers; some versions use a label
+    /// like `"bson"`. Stored as-is so the UI can display whatever's there.
+    public let format: String?
     public let timestamp: Date?
     public let kind: Kind
     public let origin: Origin
 
     public init(
         version: String?,
-        format: Int?,
+        format: String?,
         timestamp: Date?,
         kind: Kind,
         origin: Origin
@@ -80,18 +83,14 @@ public struct Identity: Hashable, Sendable, Codable {
         return cleaned.isEmpty ? nil : cleaned
     }
 
-    static func parseFormat(_ data: Data?, diagnostics: DiagnosticSink) -> Int? {
+    static func parseFormat(_ data: Data?, diagnostics: DiagnosticSink) -> String? {
         guard let data else { return nil }
         guard let raw = String(data: data, encoding: .utf8) else {
             diagnostics.emit(.warning, .formatUnparseable, "`format` not valid UTF-8.")
             return nil
         }
         let cleaned = sanitise(raw)
-        guard let value = Int(cleaned) else {
-            diagnostics.emit(.warning, .formatUnparseable, "`format` not an integer: '\(cleaned)'.")
-            return nil
-        }
-        return value
+        return cleaned.isEmpty ? nil : cleaned
     }
 
     static func parseTimestamp(_ data: Data?, diagnostics: DiagnosticSink) -> Date? {

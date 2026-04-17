@@ -88,7 +88,7 @@ struct InspectorWindow: View {
     @ViewBuilder
     private var bottomBar: some View {
         if let b = controller.backup {
-            IdentityBar(identity: b.identity, warnings: b.warnings, diagnosticCount: b.diagnostics.count) {
+            IdentityBar(identity: b.identity, warnings: b.warnings, diagnosticCount: b.diagnostics.count, isUnifiOS: b.isUnifiOSBackup) {
                 controller.showDiagnostics = true
             }
         } else if let err = controller.loadError {
@@ -116,6 +116,7 @@ struct IdentityBar: View {
     let identity: Identity
     let warnings: [String]
     let diagnosticCount: Int
+    let isUnifiOS: Bool
     var onShowDiagnostics: () -> Void
 
     var body: some View {
@@ -137,6 +138,12 @@ struct IdentityBar: View {
             Label(identity.origin.rawValue, systemImage: "server.rack")
                 .labelStyle(.titleAndIcon)
                 .foregroundStyle(.secondary)
+
+            if isUnifiOS {
+                Label("UniFi OS", systemImage: "shippingbox")
+                    .labelStyle(.titleAndIcon)
+                    .foregroundStyle(.blue)
+            }
 
             Spacer()
 

@@ -227,20 +227,35 @@ audience (network admins). Documented prominently.
 
 ---
 
-## ADR-012: `.unifi` superset is out of scope for v1
+## ADR-012: `.unifi` superset — extract embedded `.unf` automatically
 
 **Context.** UniFi OS "System Config Backup" files (`.unifi`) are a
 superset wrapping a Network `.unf` plus UCore PostgreSQL tables plus
-Protect/Access/Talk configs. Only UniHosted currently handles these.
+Protect/Access/Talk configs. Originally planned as out-of-scope (v2).
 
-**Decision.** v1 detects `.unifi` files, labels them, and refuses to
-parse. README notes this limitation. A future "extract embedded `.unf`
-from `.unifi`" feature is a v2 candidate.
+User requested v1 support. Research confirmed `.unifi` is a **plain
+unencrypted ZIP** (starts with `PK\x03\x04`) containing an embedded
+AES-encrypted `.unf` blob. The outer container is NOT AES-encrypted,
+which is why zhangyoufu's tool fails (it applies AES from byte 0).
 
-**Consequences.** Users with UDM Pros are the common case producing
-`.unifi` by default; many of them have to manually export Network-only
-`.unf` from the Network app's Advanced menu. README will document this
-workflow.
+**Decision.** v1 detects `.unifi` by testing whether byte 0 is a ZIP
+signature. If so: open as plain ZIP, locate the embedded `.unf` blob
+(by extension, path, or trial-decrypt), decrypt it, and parse as
+normal. UCore PostgreSQL tables and per-app configs are surfaced as
+metadata diagnostics but not deeply parsed (v2 candidate).
+
+**Alternatives considered.**
+- Refuse `.unifi` entirely, document manual `.unf` extraction. Rejected:
+  too much friction for UDM Pro / Dream Machine users, who are the
+  majority of current deployments.
+- Deep-parse the PostgreSQL dump. Deferred: requires pg_restore logic
+  or custom-format parsing. The Network data inside the `.unf` covers
+  the primary use case.
+
+**Consequences.** UDM Pro / UDR / UCG-Ultra users can drop their
+System Config Backup directly into the app without first extracting
+the Network-only `.unf`. The identity bar shows a "UniFi OS" badge.
+PostgreSQL data is not yet browseable — a follow-up for v2.
 
 ---
 
