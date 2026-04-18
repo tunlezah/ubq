@@ -34,6 +34,7 @@ public struct ModelMapper {
 
     public func map(_ output: CollectionStream.Output) -> MappedModel {
         var model = MappedModel()
+        var opaqueSummaries: [String] = []
         for name in output.orderedCollectionNames {
             let docs = output.recordsByCollection[name] ?? []
             switch name {
@@ -70,12 +71,7 @@ public struct ModelMapper {
             case "setting":
                 model.settings = docs.map(mapSetting)
             default:
-                diagnostics.emit(
-                    .info,
-                    .unknownCollection,
-                    "Collection '\(name)' (\(docs.count) records) is not strongly-typed; surfacing as opaque.",
-                    collection: name
-                )
+                opaqueSummaries.append("\(name)(\(docs.count))")
                 model.opaqueCollections.append(
                     OpaqueCollection(
                         name: name,
@@ -83,6 +79,13 @@ public struct ModelMapper {
                     )
                 )
             }
+        }
+        if !opaqueSummaries.isEmpty {
+            diagnostics.emit(
+                .info,
+                .unknownCollection,
+                "\(opaqueSummaries.count) non-strongly-typed collections surfaced as opaque: \(opaqueSummaries.joined(separator: ", "))."
+            )
         }
         return model
     }

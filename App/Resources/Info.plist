@@ -8,6 +8,10 @@
     <string>UniFi Backup Inspector</string>
     <key>CFBundleExecutable</key>
     <string>$(EXECUTABLE_NAME)</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>CFBundleIconName</key>
+    <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
     <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
     <key>CFBundleInfoDictionaryVersion</key>
@@ -44,6 +48,22 @@
                 <string>unf</string>
             </array>
         </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>UniFi OS System Config Backup</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Default</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>com.ubnt.unifi.os.backup</string>
+            </array>
+            <key>CFBundleTypeExtensions</key>
+            <array>
+                <string>unifi</string>
+            </array>
+        </dict>
     </array>
     <key>UTImportedTypeDeclarations</key>
     <array>
@@ -61,6 +81,23 @@
                 <key>public.filename-extension</key>
                 <array>
                     <string>unf</string>
+                </array>
+            </dict>
+        </dict>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>com.ubnt.unifi.os.backup</string>
+            <key>UTTypeDescription</key>
+            <string>UniFi OS System Config Backup</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.zip-archive</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>unifi</string>
                 </array>
             </dict>
         </dict>
