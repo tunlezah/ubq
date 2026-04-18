@@ -69,26 +69,16 @@ public struct CollectionStream {
         var reader = BSONReader(data)
         var currentCollection: String? = nil
 
-        // Sampling: the first few documents' keysets tell us what the format
-        // actually looks like on this controller version. Cheap to emit, very
-        // useful when the marker heuristic misses.
-        var fingerprintsEmitted = 0
-        let fingerprintBudget = 8
+        // When the marker heuristic fails, sample a couple of orphaned docs'
+        // keysets so bug reports can tighten the detector. Suppressed entirely
+        // on clean parses.
+        var orphanFingerprintsEmitted = 0
+        let orphanFingerprintBudget = 2
 
         while !reader.isAtEnd {
             let docStart = reader.cursor
             do {
                 let doc = try reader.readDocument()
-
-                if fingerprintsEmitted < fingerprintBudget {
-                    diagnostics.emit(
-                        .info,
-                        .other,
-                        "BSON doc @\(docStart): keys=\(doc.keys.prefix(8).joined(separator: ","))\(doc.keys.count > 8 ? ",…" : "")",
-                        offset: docStart
-                    )
-                    fingerprintsEmitted += 1
-                }
 
                 if let name = detectMarker(doc) {
                     currentCollection = name
@@ -97,14 +87,22 @@ public struct CollectionStream {
 
                 let coll = currentCollection ?? Self.uncategorisedCollection
                 if currentCollection == nil {
-                    // Only emit one such warning — don't flood diagnostics.
-                    if fingerprintsEmitted == 1 {
+                    if orphanFingerprintsEmitted == 0 {
                         diagnostics.emit(
                             .warning,
                             .orphanedRecord,
-                            "No collection marker recognised yet; records routed to '\(Self.uncategorisedCollection)'. First-doc keys logged above.",
+                            "No collection marker recognised yet; records routed to '\(Self.uncategorisedCollection)'.",
                             offset: docStart
                         )
+                    }
+                    if orphanFingerprintsEmitted < orphanFingerprintBudget {
+                        diagnostics.emit(
+                            .info,
+                            .other,
+                            "Orphan BSON doc @\(docStart): keys=\(doc.keys.prefix(8).joined(separator: ","))\(doc.keys.count > 8 ? ",…" : "")",
+                            offset: docStart
+                        )
+                        orphanFingerprintsEmitted += 1
                     }
                 }
                 handler(Record(collection: coll, document: doc))

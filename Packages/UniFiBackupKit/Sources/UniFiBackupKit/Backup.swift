@@ -36,7 +36,8 @@ public struct Backup: Sendable {
     }
 
     /// Load from in-memory bytes. Handles both `.unf` (AES-encrypted from
-    /// byte 0) and `.unifi` (plain ZIP wrapping an embedded `.unf`).
+    /// byte 0) and `.unifi` (plain ZIP — either wrapping an AES `.unf` or
+    /// shipping the Network payload inline).
     public static func load(
         sourceURL: URL? = nil,
         rawFileData: Data,
@@ -81,14 +82,19 @@ public struct Backup: Sendable {
 
     // MARK: - .unifi (UniFi OS System Config Backup)
 
-    /// `.unifi` files are **plain (unencrypted) ZIPs** wrapping:
-    ///   - an embedded AES-encrypted `.unf` Network backup
-    ///   - a PostgreSQL dump of the UCore `ulp-go` database
-    ///   - per-application config directories (Protect, Access, Talk, etc.)
-    ///   - console-level identity / system config
+    /// `.unifi` files are **plain (unencrypted) ZIPs**. Two shapes exist in the wild:
     ///
-    /// We open the outer ZIP, locate the embedded `.unf`, decrypt it, and
-    /// parse that. Other entries are surfaced as metadata.
+    ///   1. Older UniFi OS builds wrap a nested AES-encrypted `.unf` plus
+    ///      UCore Postgres + per-app configs.
+    ///   2. Newer UniFi OS builds (2025+) inline the Network payload directly:
+    ///      the outer ZIP contains `db.gz`, `version`, `format`, `timestamp`,
+    ///      `system.properties`, and optionally `backup.json` — the same
+    ///      entries that would appear *inside* a decrypted `.unf`. No
+    ///      encryption layer at all.
+    ///
+    /// We try the embedded `.unf` path first; if nothing AES-shaped is
+    /// present but the outer entries themselves look like a decrypted
+    /// Network backup, we parse them directly.
     private static func loadUnifiOS(
         sourceURL: URL?,
         outerZipData: Data,
@@ -110,30 +116,51 @@ public struct Backup: Sendable {
             "Outer ZIP entries: \(outerEntries.keys.sorted().joined(separator: ", "))"
         )
 
-        // Find the embedded .unf. Strategies:
-        //   1. Entry whose name ends with `.unf`
-        //   2. Entry whose data is AES-shaped (size % 16 == 0, not PK)
-        //   3. Entry under a `network/` subdirectory
-        let embeddedUnf: Data? = findEmbeddedUnf(in: outerEntries, diagnostics: diagnostics)
-
-        guard let unfData = embeddedUnf else {
-            throw FatalBackupError.notAUniFiNetworkBackup(
-                detail: "This is a UniFi OS System Config Backup, but no embedded Network (.unf) payload was found. Outer entries: \(outerEntries.keys.sorted().joined(separator: ", "))"
+        // Strategy A: locate an embedded AES-encrypted `.unf` blob and decrypt it.
+        if let unfData = findEmbeddedUnf(in: outerEntries, diagnostics: diagnostics) {
+            diagnostics.emit(
+                .info, .other,
+                "Found embedded Network backup (\(unfData.count) bytes). Decrypting."
+            )
+            return try loadUnf(
+                sourceURL: sourceURL,
+                ciphertext: unfData,
+                loadStatistics: loadStatistics,
+                isUnifiOSBackup: true,
+                extraDiagnostics: diagnostics
             )
         }
 
-        diagnostics.emit(
-            .info, .other,
-            "Found embedded Network backup (\(unfData.count) bytes). Decrypting."
-        )
+        // Strategy B: the outer ZIP itself IS the decrypted Network payload
+        // (newer UniFi OS builds ship it unencrypted). Detect by presence of
+        // db.gz (legacy layout) or per-collection .bson files.
+        if isDecryptedBackupLayout(outerEntries) {
+            diagnostics.emit(
+                .info, .other,
+                "Outer ZIP contains an unencrypted Network payload; parsing in-place."
+            )
+            return try parseDecryptedZip(
+                sourceURL: sourceURL,
+                entries: outerEntries,
+                loadStatistics: loadStatistics,
+                isUnifiOSBackup: true,
+                diagnostics: diagnostics
+            )
+        }
 
-        return try loadUnf(
-            sourceURL: sourceURL,
-            ciphertext: unfData,
-            loadStatistics: loadStatistics,
-            isUnifiOSBackup: true,
-            extraDiagnostics: diagnostics
+        throw FatalBackupError.notAUniFiNetworkBackup(
+            detail: "This is a UniFi OS System Config Backup, but no Network payload was found. Outer entries: \(outerEntries.keys.sorted().joined(separator: ", "))"
         )
+    }
+
+    /// True if a flat set of ZIP entries looks like the inside of a decrypted
+    /// `.unf`: either `db.gz` (legacy layout) or one-or-more `.bson` files.
+    private static func isDecryptedBackupLayout(_ entries: [String: Data]) -> Bool {
+        if entries["db.gz"] != nil { return true }
+        let hasBson = entries.keys.contains {
+            $0.hasSuffix(".bson") && !$0.hasPrefix("__MACOSX")
+        }
+        return hasBson
     }
 
     /// Heuristically locates the AES-encrypted `.unf` blob inside a `.unifi`
@@ -194,10 +221,31 @@ public struct Backup: Sendable {
         for d in zip.diagnostics { diagnostics.emit(d) }
 
         var entries: [String: Data] = [:]
-        var sizes: [String: Int] = [:]
         for (name, entry) in zip.entries {
             entries[name] = entry.data
-            sizes[name] = entry.data.count
+        }
+
+        return try parseDecryptedZip(
+            sourceURL: sourceURL,
+            entries: entries,
+            loadStatistics: loadStatistics,
+            isUnifiOSBackup: isUnifiOSBackup,
+            diagnostics: diagnostics
+        )
+    }
+
+    /// Parse the *already-decrypted* flat ZIP contents of a Network backup.
+    /// Used by both `.unf` (post-decrypt) and `.unifi` (inline unencrypted).
+    private static func parseDecryptedZip(
+        sourceURL: URL?,
+        entries: [String: Data],
+        loadStatistics: Bool,
+        isUnifiOSBackup: Bool,
+        diagnostics: DiagnosticSink
+    ) throws -> Backup {
+        var sizes: [String: Int] = [:]
+        for (name, data) in entries {
+            sizes[name] = data.count
         }
 
         diagnostics.emit(

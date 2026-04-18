@@ -8,18 +8,21 @@ struct InspectorWindow: View {
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
-            SidebarView(controller: controller)
-                .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 320)
-        } content: {
-            OutlinePane(controller: controller)
-                .navigationSplitViewColumnWidth(min: 280, ideal: 360, max: 540)
-        } detail: {
-            InspectorDetailPane(controller: controller)
+        VStack(spacing: 0) {
+            NavigationSplitView(columnVisibility: $columnVisibility) {
+                SidebarView(controller: controller)
+                    .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 320)
+            } content: {
+                OutlinePane(controller: controller)
+                    .navigationSplitViewColumnWidth(min: 280, ideal: 360, max: 540)
+            } detail: {
+                InspectorDetailPane(controller: controller)
+            }
+            .toolbar { toolbar }
+
+            bottomBar
         }
         .frame(minWidth: 900, minHeight: 560)
-        .toolbar { toolbar }
-        .safeAreaInset(edge: .bottom) { bottomBar }
         .overlay { dropOverlay }
         .sheet(isPresented: $controller.showExportSheet) {
             ExportSheet(controller: controller)
@@ -88,7 +91,12 @@ struct InspectorWindow: View {
     @ViewBuilder
     private var bottomBar: some View {
         if let b = controller.backup {
-            IdentityBar(identity: b.identity, warnings: b.warnings, diagnosticCount: b.diagnostics.count, isUnifiOS: b.isUnifiOSBackup) {
+            IdentityBar(
+                identity: b.identity,
+                warnings: b.warnings,
+                diagnostics: b.diagnostics,
+                isUnifiOS: b.isUnifiOSBackup
+            ) {
                 controller.showDiagnostics = true
             }
         } else if let err = controller.loadError {
@@ -115,7 +123,7 @@ struct InspectorWindow: View {
 struct IdentityBar: View {
     let identity: Identity
     let warnings: [String]
-    let diagnosticCount: Int
+    let diagnostics: [Diagnostic]
     let isUnifiOS: Bool
     var onShowDiagnostics: () -> Void
 
@@ -147,12 +155,12 @@ struct IdentityBar: View {
 
             Spacer()
 
-            if diagnosticCount > 0 {
+            if !diagnostics.isEmpty {
                 Button {
                     onShowDiagnostics()
                 } label: {
-                    Label("\(diagnosticCount) diagnostics", systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
+                    Label("\(diagnostics.count) diagnostics", systemImage: badgeSymbol)
+                        .foregroundStyle(badgeColor)
                 }
                 .buttonStyle(.plain)
             }
@@ -161,6 +169,22 @@ struct IdentityBar: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
         .background(.regularMaterial)
+    }
+
+    private var problemCount: Int {
+        diagnostics.lazy.filter { $0.severity != .info }.count
+    }
+
+    private var badgeSymbol: String {
+        if diagnostics.contains(where: { $0.severity == .error }) { return "xmark.octagon.fill" }
+        if problemCount > 0 { return "exclamationmark.triangle.fill" }
+        return "info.circle"
+    }
+
+    private var badgeColor: Color {
+        if diagnostics.contains(where: { $0.severity == .error }) { return .red }
+        if problemCount > 0 { return .orange }
+        return .secondary
     }
 
     private func kindSymbol(_ k: Identity.Kind) -> String {
