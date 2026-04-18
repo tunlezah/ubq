@@ -29,6 +29,7 @@ public struct ModelMapper {
         public var hotspotOperators: [HotspotOperator] = []
         public var settings: [SettingPanel] = []
         public var opaqueCollections: [OpaqueCollection] = []
+        public init() {}
     }
 
     public func map(_ output: CollectionStream.Output) -> MappedModel {

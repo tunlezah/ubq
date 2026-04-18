@@ -25,11 +25,19 @@ public struct CollectionStream {
     public struct Record: Sendable {
         public let collection: String
         public let document: BSONDocument
+        public init(collection: String, document: BSONDocument) {
+            self.collection = collection
+            self.document = document
+        }
     }
 
     public struct Output: Sendable {
         public var recordsByCollection: [String: [BSONDocument]]
         public var orderedCollectionNames: [String]
+        public init(recordsByCollection: [String: [BSONDocument]] = [:], orderedCollectionNames: [String] = []) {
+            self.recordsByCollection = recordsByCollection
+            self.orderedCollectionNames = orderedCollectionNames
+        }
     }
 
     /// Bucket name used when no collection marker has been identified yet.
