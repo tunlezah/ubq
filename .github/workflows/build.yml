@@ -62,6 +62,7 @@ jobs:
       - name: Build (Release, unsigned)
         working-directory: App
         run: |
+          set -euo pipefail
           xcodebuild \
             -project UnifiBackupInspector.xcodeproj \
             -scheme UnifiBackupInspector \
@@ -71,13 +72,13 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            clean build \
-            | xcpretty || true
+            clean build
 
       - name: Locate built app
         id: locate
         working-directory: App
         run: |
+          set -euo pipefail
           APP_PATH=$(find build/Build/Products/Release -maxdepth 2 -name "UnifiBackupInspector.app" -type d | head -n 1)
           if [ -z "$APP_PATH" ]; then
             echo "Could not locate the built .app. Dumping tree:" >&2
@@ -86,6 +87,29 @@ jobs:
           fi
           echo "app_path=$APP_PATH" >> "$GITHUB_OUTPUT"
           echo "Found app: $APP_PATH"
+
+      - name: Verify app icon was embedded
+        working-directory: App
+        run: |
+          set -euo pipefail
+          APP_PATH="${{ steps.locate.outputs.app_path }}"
+          RES="$APP_PATH/Contents/Resources"
+          echo "--- Resources ---"
+          ls -la "$RES"
+          if [ ! -f "$RES/Assets.car" ]; then
+            echo "FAIL: Assets.car is missing — actool did not run or its output was not copied." >&2
+            exit 1
+          fi
+          echo "Found Assets.car ($(stat -f%z "$RES/Assets.car") bytes)."
+          echo "--- Info.plist CFBundleIconName ---"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIconName" "$APP_PATH/Contents/Info.plist"
+          echo "--- Asset catalog contents ---"
+          xcrun --sdk macosx assetutil --info "$RES/Assets.car" | head -200
+          if ! xcrun --sdk macosx assetutil --info "$RES/Assets.car" | grep -q '"Name" : "AppIcon"'; then
+            echo "FAIL: AppIcon not present in compiled Assets.car." >&2
+            exit 1
+          fi
+          echo "AppIcon is present in Assets.car."
 
       - name: Package as .dmg
         working-directory: App

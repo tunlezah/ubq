@@ -4,6 +4,7 @@ import UniFiBackupKit
 struct DiagnosticsView: View {
     @Bindable var controller: InspectorController
     @Environment(\.dismiss) private var dismiss
+    @State private var showInfo: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -11,21 +12,33 @@ struct DiagnosticsView: View {
                 Text("Diagnostics")
                     .font(.title2.weight(.semibold))
                 Spacer()
+                if infoCount > 0 {
+                    Toggle("Show info (\(infoCount))", isOn: $showInfo)
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                }
                 Button("Copy Report") { copyReport() }
-                    .disabled(diagnostics.isEmpty)
+                    .disabled(filteredDiagnostics.isEmpty)
                 Button("Done") { dismiss() }
                     .keyboardShortcut(.defaultAction)
             }
 
-            if diagnostics.isEmpty {
+            if allDiagnostics.isEmpty {
                 ContentUnavailableView(
                     "No diagnostics",
                     systemImage: "checkmark.seal",
                     description: Text("This backup parsed cleanly.")
                 )
                 .frame(maxHeight: .infinity)
+            } else if filteredDiagnostics.isEmpty {
+                ContentUnavailableView(
+                    "No warnings or errors",
+                    systemImage: "checkmark.seal",
+                    description: Text("Only informational diagnostics were emitted. Flip the toggle above to see them.")
+                )
+                .frame(maxHeight: .infinity)
             } else {
-                List(Array(diagnostics.enumerated()), id: \.offset) { _, d in
+                List(Array(filteredDiagnostics.enumerated()), id: \.offset) { _, d in
                     DiagnosticRow(diagnostic: d)
                 }
                 .listStyle(.inset)
@@ -35,13 +48,21 @@ struct DiagnosticsView: View {
         .frame(minWidth: 520, minHeight: 420)
     }
 
-    private var diagnostics: [Diagnostic] {
+    private var allDiagnostics: [Diagnostic] {
         controller.backup?.diagnostics ?? []
+    }
+
+    private var filteredDiagnostics: [Diagnostic] {
+        showInfo ? allDiagnostics : allDiagnostics.filter { $0.severity != .info }
+    }
+
+    private var infoCount: Int {
+        allDiagnostics.lazy.filter { $0.severity == .info }.count
     }
 
     private func copyReport() {
         var out = "# UniFi Backup Inspector diagnostics\n\n"
-        for d in diagnostics {
+        for d in filteredDiagnostics {
             out += "- [\(d.severity.rawValue)] `\(d.code.rawValue)` \(d.message)"
             if let coll = d.collection { out += " (collection `\(coll)`)" }
             if let off = d.offset { out += " at offset \(off)" }

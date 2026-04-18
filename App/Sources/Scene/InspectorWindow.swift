@@ -32,6 +32,18 @@ struct InspectorWindow: View {
             DiagnosticsView(controller: controller)
                 .frame(minWidth: 560, minHeight: 420)
         }
+        .alert(
+            "Couldn't load statistics",
+            isPresented: Binding(
+                get: { controller.statsError != nil },
+                set: { if !$0 { controller.statsError = nil } }
+            ),
+            presenting: controller.statsError
+        ) { _ in
+            Button("OK", role: .cancel) { controller.statsError = nil }
+        } message: { err in
+            Text(String(describing: err))
+        }
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
             guard let p = providers.first else { return false }
             p.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in

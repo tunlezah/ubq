@@ -10,6 +10,7 @@ final class InspectorController {
     // Loaded backup + lifecycle
     var backup: Backup?
     var loadError: FatalBackupError?
+    var statsError: FatalBackupError?
     var isLoading: Bool = false
     var sourceURL: URL?
     var recentFiles: [URL] = []
@@ -77,12 +78,27 @@ final class InspectorController {
 
     func loadStatistics() async {
         guard let current = backup, let url = current.sourceURL ?? sourceURL else { return }
+        _ = current
         isLoading = true
+        statsError = nil
         defer { isLoading = false }
         let result = await Task.detached(priority: .userInitiated) {
-            try? Backup.open(url: url, loadStatistics: true)
+            do {
+                let b = try Backup.open(url: url, loadStatistics: true)
+                return Result<Backup, FatalBackupError>.success(b)
+            } catch let err as FatalBackupError {
+                return .failure(err)
+            } catch {
+                return .failure(.io(String(describing: error)))
+            }
         }.value
-        if let updated = result { backup = updated }
+
+        switch result {
+        case .success(let updated):
+            backup = updated
+        case .failure(let err):
+            statsError = err
+        }
     }
 
     private func addRecent(_ url: URL) {
