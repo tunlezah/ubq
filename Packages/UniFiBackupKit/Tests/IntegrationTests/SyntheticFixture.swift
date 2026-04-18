@@ -209,7 +209,7 @@ enum SyntheticFixture {
             ("x_password", .string("radius-secret")),
         ])
 
-        var zipEntries: [(name: String, data: Data)] = [
+        let zipEntries: [(name: String, data: Data)] = [
             ("version", Data("9.5.21\n".utf8)),
             ("format", Data("bson".utf8)),
             ("timestamp", Data("1713600000000".utf8)),
@@ -219,7 +219,6 @@ enum SyntheticFixture {
             ("admin.bson", bsonFile([adminDoc])),
             ("account.bson", bsonFile([accountDoc])),
         ]
-        _ = zipEntries // silence unused
 
         let zipped = buildZip(entries: zipEntries)
         var padded = zipped
