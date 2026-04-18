@@ -38,7 +38,6 @@ targets:
         CFBundleName: UniFi Backup Inspector
         CFBundleDisplayName: UniFi Backup Inspector
         CFBundleIdentifier: com.tunlezah.unifibackupinspector
-        CFBundleIconFile: AppIcon
         CFBundleIconName: AppIcon
         CFBundleShortVersionString: "1.0.0"
         CFBundleVersion: "1"
