@@ -21,10 +21,16 @@ final class CollectionStreamTests: XCTestCase {
         XCTAssertEqual(out.orderedCollectionNames, ["site", "device"])
         XCTAssertEqual(out.recordsByCollection["site"]?.count, 2)
         XCTAssertEqual(out.recordsByCollection["device"]?.count, 1)
-        XCTAssertTrue(sink.snapshot().isEmpty, "happy path should emit no diagnostics")
+
+        // Happy path: no warnings, no errors. Info-level fingerprint
+        // diagnostics for the first few docs are OK and expected.
+        let diags = sink.snapshot()
+        let warningsOrErrors = diags.filter { $0.severity != .info }
+        XCTAssertTrue(warningsOrErrors.isEmpty,
+                      "happy path should emit no warnings/errors, got: \(warningsOrErrors)")
     }
 
-    func testOrphanedRecordEmitsDiagnostic() {
+    func testOrphanedRecordsRouteToUncategorised() {
         var stream = Data()
         let w = BSONWriter()
         // Record without any preceding collection marker.
@@ -35,11 +41,26 @@ final class CollectionStreamTests: XCTestCase {
         let sink = DiagnosticSink()
         let out = CollectionStream.readAll(stream, diagnostics: sink)
 
-        XCTAssertEqual(out.orderedCollectionNames, ["site"])
+        // Orphan records are routed to the synthetic `_uncategorized`
+        // collection rather than silently dropped. The subsequent marker
+        // switches to "site" as normal.
+        XCTAssertEqual(
+            Set(out.orderedCollectionNames),
+            Set([CollectionStream.uncategorisedCollection, "site"])
+        )
+        XCTAssertEqual(
+            out.recordsByCollection[CollectionStream.uncategorisedCollection]?.count,
+            1
+        )
         XCTAssertEqual(out.recordsByCollection["site"]?.count, 1)
+
+        // At least one orphanedRecord warning must be emitted alongside the
+        // info-level fingerprint diagnostics.
         let diags = sink.snapshot()
-        XCTAssertEqual(diags.count, 1)
-        XCTAssertEqual(diags.first?.code, .orphanedRecord)
+        XCTAssertTrue(
+            diags.contains { $0.code == .orphanedRecord },
+            "expected at least one orphanedRecord diagnostic; got: \(diags.map(\.code))"
+        )
     }
 
     func testMalformedDocumentStopsStreamWithDiagnostic() {
@@ -56,6 +77,25 @@ final class CollectionStreamTests: XCTestCase {
         XCTAssertEqual(out.recordsByCollection["site"]?.count, 1)
         let diags = sink.snapshot()
         XCTAssertTrue(diags.contains { $0.code == .bsonMalformedDocument })
+    }
+
+    func testDetectMarkerLegacyShapes() {
+        XCTAssertEqual(
+            CollectionStream.detectMarker(doc([("collection", .string("site"))])),
+            "site"
+        )
+        XCTAssertEqual(
+            CollectionStream.detectMarker(doc([("db", .string("ace")), ("collection", .string("device"))])),
+            "device"
+        )
+        XCTAssertEqual(
+            CollectionStream.detectMarker(doc([("ns", .string("ace.wlanconf"))])),
+            "wlanconf"
+        )
+        // A big data-shaped doc is not a marker.
+        XCTAssertNil(
+            CollectionStream.detectMarker(doc((0..<10).map { i in ("k\(i)", .int32(Int32(i))) }))
+        )
     }
 
     private func doc(_ pairs: [(String, BSONValue)]) -> BSONDocument {
