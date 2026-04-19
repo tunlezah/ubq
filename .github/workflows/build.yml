@@ -94,6 +94,14 @@ jobs:
           set -euo pipefail
           APP_PATH="${{ steps.locate.outputs.app_path }}"
           RES="$APP_PATH/Contents/Resources"
+          echo "--- App bundle tree ---"
+          find "$APP_PATH" -maxdepth 3 -print
+          if [ ! -d "$RES" ]; then
+            echo "FAIL: $RES does not exist — Copy Bundle Resources phase produced no output." >&2
+            echo "--- project.pbxproj Copy Bundle Resources section ---" >&2
+            grep -A 20 "Resources */\* Resources \*/" UnifiBackupInspector.xcodeproj/project.pbxproj || true
+            exit 1
+          fi
           echo "--- Resources ---"
           ls -la "$RES"
           if [ ! -f "$RES/Assets.car" ]; then

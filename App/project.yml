@@ -31,10 +31,7 @@ targets:
     sources:
       - Sources
     resources:
-      - path: Resources
-        excludes:
-          - "Info.plist"
-          - "*.entitlements"
+      - Resources/Assets.xcassets
     info:
       path: Resources/Info.plist
       properties:
