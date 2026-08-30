@@ -59,4 +59,34 @@ final class RedactionTests: XCTestCase {
         let paths = SecretVault.findSecrets(in: d).sorted()
         XCTAssertEqual(paths, ["nested.x_password", "x_shadow"])
     }
+
+    func testUnknownXPrefixedFieldRedactedBenignPreserved() {
+        var d = BSONDocument()
+        d["x_secret_blob"] = .string("topsecret")   // unregistered but x_-prefixed
+        d["x_vlan"] = .int32(42)                     // benign x_ allowlist
+        d["name"] = .string("keep")                  // ordinary field
+        d["vlan"] = .int32(10)                       // ordinary field
+
+        let out = SecretVault.redact(d)
+        XCTAssertEqual(out["x_secret_blob"], .string("<redacted>"))
+        XCTAssertEqual(out["x_vlan"], .int32(42))
+        XCTAssertEqual(out["name"], .string("keep"))
+        XCTAssertEqual(out["vlan"], .int32(10))
+    }
+
+    func testIsSecretPredicate() {
+        XCTAssertTrue(SecretVault.isSecret(fieldName: "password"))         // registry
+        XCTAssertTrue(SecretVault.isSecret(fieldName: "x_ipsec_pre_shared_key")) // new registry entry
+        XCTAssertTrue(SecretVault.isSecret(fieldName: "x_anything_new"))   // x_ default-deny
+        XCTAssertFalse(SecretVault.isSecret(fieldName: "x_vlan"))          // benign allowlist
+        XCTAssertFalse(SecretVault.isSecret(fieldName: "name"))            // ordinary
+    }
+
+    func testFindSecretsPicksUpUnknownXField() {
+        var d = BSONDocument()
+        d["x_totally_new"] = .string("value")
+        d["x_vlan"] = .int32(7)
+        let paths = SecretVault.findSecrets(in: d)
+        XCTAssertEqual(paths, ["x_totally_new"])
+    }
 }

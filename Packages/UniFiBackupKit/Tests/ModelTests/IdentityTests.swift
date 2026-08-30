@@ -60,6 +60,59 @@ final class IdentityTests: XCTestCase {
         XCTAssertEqual(id, .full)
     }
 
+    func testPerCollectionBackupWithStatBSONEntriesIsFull() {
+        // Modern per-collection .bson full backup: no db_stat.gz, stats live in
+        // stat_*.bson entries. Must classify as .full, not .settingsOnly.
+        let sink = DiagnosticSink()
+        let id = Identity.detectKind(
+            entries: [
+                "version": Data("10.6.101".utf8),
+                "site.bson": Data(),
+                "admin.bson": Data(),
+                "account.bson": Data(),
+                "stat_5minutes.bson": Data(),
+            ],
+            collectionNames: ["site", "admin", "account", "device"],
+            diagnostics: sink
+        )
+        XCTAssertEqual(id, .full)
+        XCTAssertFalse(sink.snapshot().contains { $0.code == .settingsOnlyDetected })
+    }
+
+    func testGenuineSettingsOnlyBackupHasNoStats() {
+        // No stats entries of any kind, but controller-level collections present
+        // (so it isn't a site export). Must classify as .settingsOnly.
+        let sink = DiagnosticSink()
+        let id = Identity.detectKind(
+            entries: [
+                "version": Data("10.6.101".utf8),
+                "site.bson": Data(),
+                "admin.bson": Data(),
+                "account.bson": Data(),
+                "device.bson": Data(),
+            ],
+            collectionNames: ["site", "admin", "account", "device"],
+            diagnostics: sink
+        )
+        XCTAssertEqual(id, .settingsOnly)
+        XCTAssertTrue(sink.snapshot().contains { $0.code == .settingsOnlyDetected })
+    }
+
+    func testStatCollectionNameSignalsFullEvenWithoutStatEntry() {
+        // Legacy db.gz layout where stats collections were loaded into the model
+        // (collection names include stat_*), but no separate stat file entry.
+        let sink = DiagnosticSink()
+        let id = Identity.detectKind(
+            entries: [
+                "version": Data("9.5.21".utf8),
+                "db.gz": Data(),
+            ],
+            collectionNames: ["site", "admin", "account", "stat_life"],
+            diagnostics: sink
+        )
+        XCTAssertEqual(id, .full)
+    }
+
     func testOriginInferenceLinuxPath() {
         let props = Data("unifi.install.dir=/usr/lib/unifi\n".utf8)
         XCTAssertEqual(Identity.parseOrigin(props), .selfHostedLinux)
