@@ -66,7 +66,7 @@ let package = Package(
         .testTarget(name: "TolerantZipTests", dependencies: ["TolerantZip"]),
         .testTarget(name: "UniFiBSONTests", dependencies: ["UniFiBSON"]),
         .testTarget(name: "BackupStreamTests", dependencies: ["BackupStream", "UniFiBSON", "Diagnostics"]),
-        .testTarget(name: "ModelTests", dependencies: ["UniFiModel", "Diagnostics"]),
+        .testTarget(name: "ModelTests", dependencies: ["UniFiModel", "UniFiBSON", "Diagnostics"]),
         .testTarget(name: "RedactionTests", dependencies: ["Redaction", "Export", "UniFiBSON", "UniFiModel"]),
         .testTarget(name: "ExportTests", dependencies: ["Export", "UniFiModel", "UniFiBSON"]),
         .testTarget(
