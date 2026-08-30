@@ -18,7 +18,11 @@ public enum Gunzip {
         case truncatedStream
     }
 
-    public static func decompress(_ gz: Data) throws -> Data {
+    public static func decompress(_ input: Data) throws -> Data {
+        // Bug 7 hardening: rebind to a zero-based buffer so every absolute index
+        // below is correct even when a `Data` slice (nonzero `startIndex`) is
+        // passed in.
+        let gz = input.startIndex == 0 ? input : Data(input)
         guard gz.count >= 18, gz[0] == 0x1f, gz[1] == 0x8b else {
             throw Error.notGzip
         }

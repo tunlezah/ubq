@@ -50,4 +50,75 @@ final class UnfCryptoTests: XCTestCase {
             "IV constant must match UniFi's published value — do not mutate without ADR."
         )
     }
+
+    // MARK: - Generic CBC helper (AES-128 and AES-256)
+
+    func testDecryptCBCRoundTripAES256() throws {
+        let key = (0..<32).map { UInt8($0) }           // 32-byte AES-256 key
+        let iv = [UInt8](repeating: 0x11, count: 16)
+        let plain = Data(repeating: 0xAB, count: 48)   // multiple of 16
+        let cipher = try UnfCipher.encryptCBC(plain, key: key, iv: iv)
+        XCTAssertEqual(cipher.count, plain.count)
+        let out = try UnfCipher.decryptCBC(cipher, key: key, iv: iv)
+        XCTAssertEqual(out, plain)
+    }
+
+    func testDecryptCBCRoundTripAES128() throws {
+        let iv = [UInt8](repeating: 0x22, count: 16)
+        let plain = Data((0..<32).map { UInt8($0) })
+        let cipher = try UnfCipher.encryptCBC(plain, key: UnfCipher.key, iv: iv)
+        let out = try UnfCipher.decryptCBC(cipher, key: UnfCipher.key, iv: iv)
+        XCTAssertEqual(out, plain)
+    }
+
+    func testDecryptCBCHandlesSlicedInput() throws {
+        let key = (0..<32).map { UInt8($0) }
+        let iv = [UInt8](repeating: 0x33, count: 16)
+        let plain = Data(repeating: 0x5A, count: 32)
+        let cipher = try UnfCipher.encryptCBC(plain, key: key, iv: iv)
+
+        // Prepend junk then slice it off so startIndex != 0.
+        var withJunk = Data([0x00, 0x01, 0x02, 0x03, 0x04])
+        withJunk.append(cipher)
+        let sliced = withJunk[5...]
+        XCTAssertNotEqual(sliced.startIndex, 0)
+
+        let out = try UnfCipher.decryptCBC(sliced, key: key, iv: iv)
+        XCTAssertEqual(out, plain)
+    }
+
+    // MARK: - AES-256 UniFi OS console container
+
+    func testDecryptAES256CBCWithPrependedIV() throws {
+        let key = (0..<32).map { UInt8($0) }
+        let iv = [UInt8](repeating: 0x44, count: 16)
+
+        var payload = Data("UniFi OS console backup payload!".utf8)
+        let pad = (16 - payload.count % 16) % 16
+        payload.append(Data(repeating: 0x00, count: pad))   // block-align
+
+        let body = try UnfCipher.encryptCBC(payload, key: key, iv: iv)
+        var blob = Data(iv)                                  // IV prepended
+        blob.append(body)
+
+        let out = try UnfCipher.decryptAES256CBC(blob, key: key, ivPrepended: true)
+        XCTAssertEqual(out, payload)
+    }
+
+    func testDecryptAES256CBCRejectsNonPrependedMode() {
+        let key = (0..<32).map { UInt8($0) }
+        let blob = Data(repeating: 0, count: 48)
+        XCTAssertThrowsError(try UnfCipher.decryptAES256CBC(blob, key: key, ivPrepended: false))
+    }
+
+    func testAES256ConsoleKeyIsUnverifiedPlaceholder() {
+        // The AES-256 console key ships as a placeholder pending verification;
+        // the loader must refuse to decrypt with it until confirmed. See
+        // UnfCipher.unifiOSKey256 for the TODO(key) and sourcing.
+        XCTAssertFalse(
+            UnfCipher.unifiOSKey256Verified,
+            "The AES-256 console key must remain gated until the real 32 bytes are verified."
+        )
+        XCTAssertEqual(UnfCipher.unifiOSKey256.count, 32)
+    }
 }

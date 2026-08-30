@@ -23,10 +23,13 @@ public struct TolerantZipReader {
     public let entries: [String: Entry]
     public let diagnostics: [Diagnostic]
 
-    public init(_ data: Data) throws {
+    public init(_ input: Data) throws {
         var entries: [String: Entry] = [:]
         var diags: [Diagnostic] = []
-        let base = data
+        // Bug 7 hardening: rebind to a zero-based buffer so every absolute
+        // index below is correct even when a `Data` slice (nonzero
+        // `startIndex`) is passed in.
+        let base = input.startIndex == 0 ? input : Data(input)
         var cursor = 0
 
         while cursor + 30 <= base.count {
@@ -92,7 +95,8 @@ public struct TolerantZipReader {
                 // *or* the next local file header / central directory entry.
                 guard let found = Self.findEndOfDeflatedPayload(
                     in: base,
-                    from: dataStart
+                    from: dataStart,
+                    method: method
                 ) else {
                     diags.append(
                         Diagnostic(
@@ -203,18 +207,23 @@ public struct TolerantZipReader {
 
     /// When a local header sets the "data descriptor" flag with zero sizes, we
     /// must scan forward to find the end of the deflated payload. Strategy:
-    /// look for the data-descriptor signature (0x08074b50) followed by a
-    /// plausible CRC+sizes that's immediately followed by either another local
-    /// file header, the central directory, or EOF. Fall back to searching for
-    /// the next local file header signature and assuming an implicit
+    /// look for the data-descriptor signature (0x08074b50) and **validate** the
+    /// candidate boundary (Bug 8) — a `PK\x07\x08` byte sequence can occur
+    /// *inside* the deflate/stored payload and false-positive this scan. We
+    /// only accept a candidate when the bytes before it decode cleanly (and,
+    /// when the descriptor carries a nonzero uncompressed size, the produced
+    /// size matches). Otherwise we keep scanning. Fall back to searching for
+    /// the next local file header / central directory and assuming an implicit
     /// descriptor preceded it.
     private static func findEndOfDeflatedPayload(
         in data: Data,
-        from start: Int
+        from start: Int,
+        method: UInt16
     ) -> (payloadEnd: Int, declaredUncompressedSize: Int?)? {
         // Walk forward. This is O(n) per entry but zipped UniFi payloads are at
         // most a few hundred MB decompressed; perfectly acceptable for a
-        // correctness-over-speed recovery path.
+        // correctness-over-speed recovery path. The per-candidate validation
+        // only fires on the rare `PK\x07\x08` byte hit, so it stays O(n)-ish.
         var i = start
         while i + 4 <= data.count {
             let s0 = data[i]
@@ -223,14 +232,22 @@ public struct TolerantZipReader {
             let s3 = data[i + 3]
             // Data descriptor signature? PK\x07\x08
             if s0 == 0x50, s1 == 0x4b, s2 == 0x07, s3 == 0x08 {
-                // payloadEnd is at `i`; descriptor is (sig)+CRC+CS+UCS = 16
-                guard i + 16 <= data.count else { return (i, nil) }
-                let ucs =
-                    UInt32(data[i + 12])
-                    | (UInt32(data[i + 13]) << 8)
-                    | (UInt32(data[i + 14]) << 16)
-                    | (UInt32(data[i + 15]) << 24)
-                return (i, Int(ucs))
+                // payloadEnd would be at `i`; descriptor is (sig)+CRC+CS+UCS = 16.
+                let declaredUncomp: Int? = (i + 16 <= data.count)
+                    ? Int(readU32(data, i + 12))
+                    : nil
+                if payloadBoundaryIsValid(
+                    data,
+                    start: start,
+                    end: i,
+                    method: method,
+                    declaredUncompressedSize: declaredUncomp
+                ) {
+                    return (i, declaredUncomp)
+                }
+                // False positive inside the payload — keep scanning.
+                i += 1
+                continue
             }
             // Next local file header? PK\x03\x04 — then the preceding 12 bytes
             // are the descriptor without signature.
@@ -262,6 +279,55 @@ public struct TolerantZipReader {
             i += 1
         }
         return (data.count, nil)
+    }
+
+    /// Little-endian UInt32 read at an absolute offset in a zero-based buffer.
+    private static func readU32(_ data: Data, _ off: Int) -> UInt32 {
+        UInt32(data[off])
+        | (UInt32(data[off + 1]) << 8)
+        | (UInt32(data[off + 2]) << 16)
+        | (UInt32(data[off + 3]) << 24)
+    }
+
+    /// Bug 8: decide whether `data[start..<end]` is a real payload boundary for
+    /// a data-descriptor entry, rather than a `PK\x07\x08` sequence that merely
+    /// occurs inside the payload bytes.
+    ///
+    /// * DEFLATE (method 8): the bytes must raw-inflate without error, and — if
+    ///   the descriptor declared a nonzero uncompressed size — the produced size
+    ///   must match. A truncated prefix of a real deflate stream fails to
+    ///   inflate, so embedded signatures are rejected and the scan continues.
+    /// * STORED (method 0): the raw length must equal the descriptor's declared
+    ///   (nonzero) uncompressed size.
+    private static func payloadBoundaryIsValid(
+        _ data: Data,
+        start: Int,
+        end: Int,
+        method: UInt16,
+        declaredUncompressedSize: Int?
+    ) -> Bool {
+        guard end > start else { return false }
+        switch method {
+        case 8:
+            let payload = data.subdata(in: start..<end)
+            guard let inflated = try? inflateRaw(
+                payload,
+                estimatedSize: declaredUncompressedSize ?? 0
+            ) else {
+                return false
+            }
+            if let ucs = declaredUncompressedSize, ucs != 0 {
+                return inflated.count == ucs
+            }
+            return true
+        case 0:
+            if let ucs = declaredUncompressedSize, ucs != 0 {
+                return ucs == (end - start)
+            }
+            return true
+        default:
+            return true
+        }
     }
 
     /// Raw DEFLATE inflation (no zlib wrapper, no gzip wrapper).
