@@ -110,10 +110,17 @@ export lane is getting crowded.
   v10.x".
 * Marker shape confirmed: `{__cmd:"select", collection:"X"}` — the current
   `detectMarker` (small doc with a `collection` string) already covers it.
+* On the per-collection `.bson` layout this repo also supports: current
+  10.x tooling still observes the single `db.gz` stream as the standard;
+  `.bson` entries appear in some exports but aren't confirmed as a stock
+  format change. (Notably, `autobackup_meta.json` labels the payload
+  `"format": "bson"` — consistent with the `format` values this parser
+  already tolerates.) Keep the dual-path loader; it's the same defensive
+  posture the other 10.x-aware tool takes.
 * **UniFi 10.1 (Feb 2026) added per-application / settings-only console
   backups** — first product-level move toward selective backup, and another
-  reason files with unfamiliar layouts will keep appearing. The dual-path
-  loader is the right architecture; keep it schema-tolerant.
+  reason files with unfamiliar layouts will keep appearing. Keep the loader
+  schema-tolerant.
 * **Version-parity restore rule confirmed**: a backup restores only into a
   Network version **equal or newer** than the one that produced it;
   forward-only schema migration, no downgrade path. (Feeds the Restore
@@ -126,10 +133,9 @@ export lane is getting crowded.
 ### 3.3 `.unifi` has (at least) a third shape — and it's the common one
 
 `ADR-012` treats `.unifi` as a plain unencrypted ZIP (two sub-shapes:
-embedded `.unf`, or inline Network payload). Real files matching those
-shapes evidently exist — the loader was built against them. But the format
-documented by EvilBit-Labs (Aug 2026) and consistent with UniHosted's
-behaviour is different:
+embedded `.unf`, or inline Network payload). Keep those paths — they're
+cheap and defensive. But the console format documented by EvilBit-Labs
+(Aug 2026), and consistent with UniHosted's behaviour, is different:
 
 * **AES-256-CBC, NoPadding, static 32-byte key** (published in
   `unifi_extract`'s `DECRYPTION.md`), **IV prepended** as the first 16
@@ -258,9 +264,12 @@ ever — the default posture. §5 covers the one optional exception.
 12. **Charts on statistics** (Swift Charts): WAN throughput, per-AP client
     counts, top DPI apps from `stat_daily`/`stat_hourly` once stats
     loading is fixed. Offline stats visualisation exists nowhere else.
-13. **Autobackup folder view**: open a folder of `autobackup_*.unf` (+
-    `meta.json`), timeline sidebar, one-click diff of adjacent snapshots
-    (pairs with #8).
+13. **Autobackup folder view**: open a folder of `autobackup_*.unf`,
+    timeline sidebar, one-click diff of adjacent snapshots (pairs with
+    #8). The `autobackup_meta.json` sidecar's schema is known (an object
+    keyed by filename → `{version, time (epoch ms), datetime, format,
+    days, size}`) — parse it for the timeline, fall back to filename
+    parsing (`autobackup_<ver>_<yyyymmdd>_<hhmm>_<epochms>.unf`).
 
 ### Tier 3 — expansion (still offline)
 
@@ -298,12 +307,25 @@ ever — the default posture. §5 covers the one optional exception.
 
 ---
 
-## 5. Optional controller connectivity (design sketch)
+## 5. Optional controller connectivity (design)
 
-*(Being finalised against API research — see §5 sources; the constraints
-below are firm regardless of endpoint details.)*
+### 5.1 API reality check (researched, Aug 2026)
 
-Principles, honouring the project's identity:
+The deciding fact: **no official UniFi API exposes backups.**
+
+| Channel | Auth | Works on | Backup access | Good for |
+|---|---|---|---|---|
+| **Official Network API** ("Integration API", Network 9.0+, spec v10.4.57) — `https://<console>/proxy/network/integration/v1/…` | `X-API-KEY` header; key created in Network UI → Integrations; stateless, no CSRF | UniFi OS consoles + UniFi OS Server only — **not** legacy self-hosted | **None** (zero backup endpoints in the OpenAPI spec) | Read-only config/inventory: sites, devices + stats, clients, WLANs (`wifi/broadcasts`), networks, firewall policies/zones, VPN, RADIUS profiles → the **drift check** |
+| **Site Manager API** — `https://api.ui.com/v1/…` | `X-API-Key` from unifi.ui.com → Settings → API Keys; read-only | Any console enrolled in the cloud | **None** native; connector passthrough is capped (100 req/min/console, 25 s, **10 MB response max** — too small for many backups) | Fleet listing (hosts/sites/devices, ISP metrics); skip for v1 — cloud-account dependency contradicts local-first |
+| **Legacy private API** — `POST /api/s/{site}/cmd/backup` etc. | Local admin username/password; UniFi OS: login `/api/auth/login`, prefix `/proxy/network`, `x-csrf-token` from the `TOKEN` cookie's JWT; legacy self-hosted: `/api/login` | Everything, incl. legacy self-hosted | **Yes — the only way**: `{"cmd":"backup","days":-1}` → download `/dl/backup/<uuid>.unf`; `{"cmd":"list-backups"}` → `/dl/autobackup/<file>.unf` | Fetch-backup-now, autobackup listing/download |
+
+Implication: the two useful features need *different* channels — backup
+fetch rides the private API (admin credentials, works everywhere, but
+undocumented and may drift across releases; the reference client marks
+these calls experimental), while drift-check rides the official API-key
+route (documented, stable, but UniFi OS only and config-read only).
+
+### 5.2 Principles, honouring the project's identity
 
 * **Offline remains the default and the identity.** The connectivity
   feature is OFF until a user explicitly adds a controller; the app makes
@@ -319,21 +341,29 @@ Principles, honouring the project's identity:
   document why. If the no-network guarantee is considered marketing-
   critical, ship two build flavours (the entitlement is static per
   binary); otherwise one binary + honest docs.
-* Credentials in **Keychain**, API-key auth preferred over passwords,
-  self-signed TLS handled by pinning the console's cert on first use
-  (trust-on-first-use with fingerprint display) rather than disabling
-  validation.
+* Credentials in **Keychain**, API-key auth wherever the feature allows
+  it; self-signed TLS handled by pinning the console's certificate on
+  first use (trust-on-first-use with fingerprint display) rather than
+  disabling validation. `api.ui.com`, if ever used, verifies normally
+  (public CA).
 
-Candidate capabilities, in value order:
+### 5.3 Capabilities, phased
 
-1. **Fetch backup now** — trigger/download a fresh `.unf` from the
-   controller and open it directly (no SSH, no web UI dance).
-2. **Autobackup listing** — enumerate and download the console's rolling
-   autobackups; combined with Tier-2 #13, this gives "timeline of my
-   network" with zero manual file shuffling.
-3. **Drift check** — fetch live config (read-only) and diff it against
-   the opened backup using the same engine as #8: "what changed since
-   this backup was taken".
+1. **Phase A — Fetch backup / autobackup timeline** (private API, admin
+   credentials): trigger `cmd/backup`, download the `.unf`, open it
+   directly; list and pull rolling autobackups (pairs with Tier-2 #13 for
+   "timeline of my network" with zero file shuffling). Works on legacy
+   self-hosted controllers too. Treat as best-effort: the endpoints are
+   unofficial, so failures degrade to a helpful "download it from
+   Settings → System → Backups" message.
+2. **Phase B — Drift check** (official Integration API, `X-API-KEY`,
+   UniFi OS 9.0+): fetch live WLANs/networks/firewall policies/devices
+   read-only and diff against the opened backup with the same engine as
+   Tier-2 #8 — "what changed since this backup was taken". Documented,
+   stateless, and no admin password ever stored for this path.
+3. **Not planned**: Site Manager / cloud connector (account dependency,
+   10 MB proxy cap breaks backup transfer), and any write to the
+   controller.
 
 ---
 
@@ -443,6 +473,16 @@ https://williehowe.com/2026/02/10/unifi-10-1-backup-changes/ ·
 https://vninja.net/2026/07/17/migrating-from-unifi-uxg-lite-to-express-7/ ·
 https://help.ui.com/hc/en-us/articles/360008976393-Backups-and-Migration-in-UniFi ·
 https://cvefeed.io/vuln/detail/CVE-2026-54405
+
+Controller APIs (§5):
+https://developer.ui.com/network/v10.4.57/openapi.json ·
+https://developer.ui.com/site-manager/v1.0.0/openapi.json ·
+https://help.ui.com/hc/en-us/articles/30076656117655-Getting-Started-with-the-Official-UniFi-API ·
+https://artofwifi.net/blog/unifi-api-authentication-local-admin-vs-api-key-vs-site-manager ·
+https://github.com/Art-of-WiFi/UniFi-API-client/blob/main/src/Client.php ·
+https://ubntwiki.com/products/software/unifi-controller/api ·
+https://github.com/gebn/unifibackup (autobackup dir + `autobackup_meta.json` schema) ·
+https://community.ui.com/rss/releases/UniFi-Network-Controller/e6712595-81bb-4829-8e42-9e2630fabcfe (10.6.101, 2026-08-26)
 
 LLM context windows:
 https://www.elvex.com/blog/context-length-comparison-ai-models-2026 ·
