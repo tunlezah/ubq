@@ -4,6 +4,7 @@ enum MarkdownExporter {
     static func render(
         _ ir: IntermediateRepresentation,
         preset: LLMPreset,
+        budget: Int,
         includesSecrets: Bool
     ) -> String {
         var out = ""
@@ -11,27 +12,45 @@ enum MarkdownExporter {
         out += "\n"
         let useXML = preset.usesXMLSections
         for section in ir.sections {
-            if useXML {
-                out += "<\(section.tag) title=\"\(escape(section.title))\">\n\n"
-            } else {
-                out += "## \(titleCase(section.tag)): \(section.title)\n\n"
-            }
-            if !section.fields.isEmpty {
-                out += "| Key | Value |\n|---|---|\n"
-                for (k, v) in section.fields {
-                    out += "| \(k) | \(escapeTableCell(v)) |\n"
-                }
-                out += "\n"
-            }
-            if let raw = section.rawJSON {
-                out += "```json\n\(raw)\n```\n\n"
-            }
-            if useXML {
-                out += "</\(section.tag)>\n\n"
-            }
+            out += render(section: section, useXML: useXML, depth: 2)
         }
-        if out.count > preset.targetCharacterBudget {
-            out += "\n> ⚠ This export is ~\(out.count) characters, exceeding the suggested budget for \(preset.displayName) (~\(preset.targetCharacterBudget)). Consider splitting.\n"
+        if out.count > budget {
+            out += "\n> ⚠ This export is ~\(out.count) characters, exceeding the suggested budget for \(preset.displayName) (~\(budget)). Consider splitting.\n"
+        }
+        return out
+    }
+
+    /// Renders one section and, recursively, its nested children. `depth`
+    /// only matters for non-XML presets: each nesting level goes one heading
+    /// level deeper (`##`, `###`, …, capped at `######`). The XML style
+    /// nests naturally via `<tag>…</tag>` wrapping instead.
+    private static func render(
+        section: IntermediateRepresentation.Section,
+        useXML: Bool,
+        depth: Int
+    ) -> String {
+        var out = ""
+        if useXML {
+            out += "<\(section.tag) title=\"\(escape(section.title))\">\n\n"
+        } else {
+            let level = String(repeating: "#", count: min(max(depth, 1), 6))
+            out += "\(level) \(titleCase(section.tag)): \(section.title)\n\n"
+        }
+        if !section.fields.isEmpty {
+            out += "| Key | Value |\n|---|---|\n"
+            for (k, v) in section.fields {
+                out += "| \(k) | \(escapeTableCell(v)) |\n"
+            }
+            out += "\n"
+        }
+        if let raw = section.rawJSON {
+            out += "```json\n\(raw)\n```\n\n"
+        }
+        for child in section.children {
+            out += render(section: child, useXML: useXML, depth: depth + 1)
+        }
+        if useXML {
+            out += "</\(section.tag)>\n\n"
         }
         return out
     }
@@ -42,6 +61,9 @@ enum MarkdownExporter {
         includesSecrets: Bool
     ) -> String {
         var out = "# UniFi Backup Export\n\n"
+        if let note = h.partNote {
+            out += "> \(escape(note))\n\n"
+        }
         if includesSecrets {
             out += "> ⚠ **This export INCLUDES secrets** (WPA keys, admin hashes, RADIUS shared secrets, TOTP). Do not share.\n\n"
         }

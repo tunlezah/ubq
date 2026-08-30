@@ -4,21 +4,37 @@ enum TextExporter {
     static func render(
         _ ir: IntermediateRepresentation,
         preset: LLMPreset,
+        budget: Int,
         includesSecrets: Bool
     ) -> String {
         var out = ""
         out += banner(header: ir.header, preset: preset, includesSecrets: includesSecrets)
         out += "\n"
         for section in ir.sections {
-            out += "─────────────────────────────────────────────────────────────\n"
-            out += "\(section.tag.uppercased()): \(section.title)\n"
-            out += "─────────────────────────────────────────────────────────────\n"
-            for (k, v) in section.fields {
-                out += "  \(k): \(v)\n"
-            }
-            out += "\n"
+            out += render(section: section, depth: 0)
         }
-        out += truncationNote(producedChars: out.count, preset: preset)
+        out += truncationNote(producedChars: out.count, budget: budget, preset: preset)
+        return out
+    }
+
+    /// Renders one section and, recursively, its nested children, indenting
+    /// two spaces per nesting level.
+    private static func render(
+        section: IntermediateRepresentation.Section,
+        depth: Int
+    ) -> String {
+        let indent = String(repeating: "  ", count: depth)
+        var out = ""
+        out += "\(indent)─────────────────────────────────────────────────────────────\n"
+        out += "\(indent)\(section.tag.uppercased()): \(section.title)\n"
+        out += "\(indent)─────────────────────────────────────────────────────────────\n"
+        for (k, v) in section.fields {
+            out += "\(indent)  \(k): \(v)\n"
+        }
+        out += "\n"
+        for child in section.children {
+            out += render(section: child, depth: depth + 1)
+        }
         return out
     }
 
@@ -29,6 +45,7 @@ enum TextExporter {
     ) -> String {
         var out = "UNIFI BACKUP EXPORT\n"
         out += "===================\n"
+        if let note = ir.partNote { out += "Part               : \(note)\n" }
         if let v = ir.version { out += "Controller version : \(v)\n" }
         if let f = ir.format { out += "Backup format      : \(f)\n" }
         if let t = ir.timestamp {
@@ -48,9 +65,9 @@ enum TextExporter {
         return out
     }
 
-    private static func truncationNote(producedChars: Int, preset: LLMPreset) -> String {
-        if producedChars > preset.targetCharacterBudget {
-            return "\n[note] This export is ~\(producedChars) characters, exceeding the suggested budget for \(preset.displayName) (~\(preset.targetCharacterBudget)). Consider splitting.\n"
+    private static func truncationNote(producedChars: Int, budget: Int, preset: LLMPreset) -> String {
+        if producedChars > budget {
+            return "\n[note] This export is ~\(producedChars) characters, exceeding the suggested budget for \(preset.displayName) (~\(budget)). Consider splitting.\n"
         }
         return ""
     }

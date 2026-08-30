@@ -35,25 +35,51 @@ public struct IntermediateRepresentation: Sendable {
         public let redacted: Bool
         public let selectionCount: Int
         public let producedBy: String
-        public init(version: String?, format: String?, timestamp: Date?, origin: Identity.Origin?, kind: Identity.Kind?, redacted: Bool, selectionCount: Int, producedBy: String) {
-            self.version = version; self.format = format; self.timestamp = timestamp; self.origin = origin; self.kind = kind; self.redacted = redacted; self.selectionCount = selectionCount; self.producedBy = producedBy
+        /// Set by `Exporter.exportSlices` when a selection was split across
+        /// more than one standalone document (e.g. "part 2 of 5"); `nil` for
+        /// a single-document export.
+        public let partNote: String?
+        public init(
+            version: String?,
+            format: String?,
+            timestamp: Date?,
+            origin: Identity.Origin?,
+            kind: Identity.Kind?,
+            redacted: Bool,
+            selectionCount: Int,
+            producedBy: String,
+            partNote: String? = nil
+        ) {
+            self.version = version; self.format = format; self.timestamp = timestamp; self.origin = origin; self.kind = kind; self.redacted = redacted; self.selectionCount = selectionCount; self.producedBy = producedBy; self.partNote = partNote
         }
     }
 
+    /// Builds the IR from a user selection, preserving hierarchy: when the
+    /// selection includes a container node (`.site`, `.siteChildCategory`,
+    /// `.wlanGroup`, `.category`, `.opaqueCollection`), its descendants — the
+    /// full subtree, per `TreeBuilder.children(of:)` — are nested under that
+    /// container's `Section.children` rather than flattened alongside it.
+    /// A record selected without its container ancestor present stays a
+    /// top-level `Section`, matching the flat behaviour of a single-node
+    /// selection.
     public static func from(
         _ nodes: [TreeNode],
         identity: Identity?,
         redact: Bool
     ) -> IntermediateRepresentation {
-        let flattened = TreeBuilder.flatten(nodes)
-        let leafNodes = flattened.filter { node in
-            // A "leaf" for export = anything that carries a rawDocument, or is
-            // a collection / category we want to capture as a heading.
-            node.rawDocument != nil
+        var visited = Set<String>()
+        var sections: [Section] = []
+        for node in nodes {
+            if visited.contains(node.id) { continue }
+            if let section = buildSection(node: node, redact: redact, visited: &visited) {
+                sections.append(section)
+            }
         }
-        let sections = leafNodes.map { node -> Section in
-            renderSection(node: node, redact: redact)
-        }
+
+        // Selection count mirrors the flat "how many exportable records did
+        // this pull in" metric regardless of how they end up nested.
+        let recordCount = TreeBuilder.flatten(nodes).filter { $0.rawDocument != nil }.count
+
         let header = Header(
             version: identity?.version,
             format: identity?.format,
@@ -61,30 +87,68 @@ public struct IntermediateRepresentation: Sendable {
             origin: identity?.origin,
             kind: identity?.kind,
             redacted: redact,
-            selectionCount: leafNodes.count,
+            selectionCount: recordCount,
             producedBy: "UniFi Backup Inspector"
         )
         return IntermediateRepresentation(header: header, sections: sections)
     }
 
-    private static func renderSection(node: TreeNode, redact: Bool) -> Section {
-        let raw = node.rawDocument ?? BSONDocument()
+    /// Container node kinds whose descendants (per `TreeBuilder.children(of:)`)
+    /// get nested under them rather than flattened.
+    private static func isContainer(_ node: TreeNode) -> Bool {
+        switch node {
+        case .category, .site, .siteChildCategory, .wlanGroup, .opaqueCollection:
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Recursively builds a `Section` for `node`. Containers walk their model
+    /// children (skipping any already `visited` — e.g. because they were
+    /// already emitted top-level earlier in the selection) and nest the
+    /// results; leaves render flat as before. Returns `nil` when there's
+    /// nothing to show (a container with no own document and no non-empty
+    /// descendants, or a leaf with no backing document).
+    private static func buildSection(
+        node: TreeNode,
+        redact: Bool,
+        visited: inout Set<String>
+    ) -> Section? {
+        visited.insert(node.id)
+
+        var childSections: [Section] = []
+        if isContainer(node) {
+            for child in TreeBuilder.children(of: node) {
+                if visited.contains(child.id) { continue }
+                if let s = buildSection(node: child, redact: redact, visited: &visited) {
+                    childSections.append(s)
+                }
+            }
+        }
+
+        guard let raw = node.rawDocument else {
+            guard isContainer(node), !childSections.isEmpty else { return nil }
+            return Section(tag: tag(for: node), title: node.title, fields: [], rawJSON: nil, children: childSections)
+        }
+
         let effective = redact ? SecretVault.redact(raw) : raw
-        let tag = tag(for: node)
         let fields = prettyFields(from: effective)
         let rawJSON = jsonString(from: effective)
-        return Section(tag: tag, title: node.title, fields: fields, rawJSON: rawJSON, children: [])
+        return Section(tag: tag(for: node), title: node.title, fields: fields, rawJSON: rawJSON, children: childSections)
     }
 
     private static func tag(for node: TreeNode) -> String {
         switch node {
+        case .category(let n): n.id
         case .site: "site"
+        case .siteChildCategory(let n): n.kind.rawValue
         case .device: "device"
-        case .wlan: "wlan"
         case .wlanGroup: "wlan_group"
+        case .wlan: "wlan"
         case .network: "network"
-        case .firewallRule: "firewall_rule"
         case .firewallGroup: "firewall_group"
+        case .firewallRule: "firewall_rule"
         case .portForward: "port_forward"
         case .portProfile: "port_profile"
         case .routing: "routing"
@@ -94,8 +158,8 @@ public struct IntermediateRepresentation: Sendable {
         case .radius: "radius_profile"
         case .hotspotOp: "hotspot_operator"
         case .setting: "setting"
+        case .opaqueCollection(let n): n.name
         case .opaqueRecord(let n): n.parentCollection
-        default: "record"
         }
     }
 
