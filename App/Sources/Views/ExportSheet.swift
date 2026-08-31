@@ -5,6 +5,8 @@ struct ExportSheet: View {
     @Bindable var controller: InspectorController
     @Environment(\.dismiss) private var dismiss
     @State private var preview: String = ""
+    @State private var sliceCount: Int = 1
+    @State private var splitStatus: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -21,16 +23,37 @@ struct ExportSheet: View {
             }
 
             GroupBox("Target model") {
-                Picker("", selection: $controller.exportPreset) {
-                    ForEach(LLMPreset.allCases, id: \.self) { p in
-                        Text(p.displayName).tag(p)
+                VStack(alignment: .leading, spacing: 8) {
+                    Picker("", selection: $controller.exportPreset) {
+                        ForEach(LLMPreset.allCases, id: \.self) { p in
+                            Text(p.displayName).tag(p)
+                        }
                     }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+
+                    HStack(spacing: 8) {
+                        Text("Character budget:")
+                            .font(.callout)
+                        TextField("", text: budgetTextBinding)
+                            .textFieldStyle(.roundedBorder)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 90)
+                        Stepper("", value: budgetIntBinding, in: 0...1_000_000, step: 500)
+                            .labelsHidden()
+                        Button("Reset to Default") {
+                            controller.setBudgetOverride(nil, for: controller.exportPreset)
+                            regeneratePreview()
+                        }
+                        .controlSize(.small)
+                        .disabled(controller.budgetOverride(for: controller.exportPreset) == nil)
+                        Spacer(minLength: 0)
+                    }
+
+                    Text("Default for \(controller.exportPreset.displayName): \(controller.exportPreset.targetCharacterBudget) characters")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-                .pickerStyle(.menu)
-                .labelsHidden()
-                Text(budgetHint)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
 
             GroupBox("Secrets") {
@@ -53,15 +76,39 @@ struct ExportSheet: View {
             }
 
             GroupBox("Preview") {
-                ScrollView {
-                    Text(preview.isEmpty ? "(select items to export)" : String(preview.prefix(2000)))
-                        .font(.system(.caption, design: .monospaced))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(8)
+                VStack(alignment: .leading, spacing: 8) {
+                    ScrollView {
+                        Text(preview.isEmpty ? "(select items to export)" : String(preview.prefix(2000)))
+                            .font(.system(.caption, design: .monospaced))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(8)
+                    }
+                    .frame(minHeight: 140, idealHeight: 220)
+                    .background(Color.black.opacity(0.05))
+
+                    HStack(alignment: .top) {
+                        Text(budgetFeedback)
+                            .font(.caption)
+                            .foregroundStyle(isOverBudget ? .red : .secondary)
+                        Spacer(minLength: 8)
+                        if isOverBudget {
+                            Button {
+                                performSplit()
+                            } label: {
+                                Label("Split into \(sliceCount) Files…", systemImage: "square.grid.2x2")
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
+                    }
+
+                    if let splitStatus {
+                        Text(splitStatus)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
-                .frame(minHeight: 140, idealHeight: 220)
-                .background(Color.black.opacity(0.05))
             }
 
             Spacer(minLength: 0)
@@ -108,16 +155,89 @@ struct ExportSheet: View {
         }
     }
 
-    private var budgetHint: String {
-        let budget = controller.exportPreset.targetCharacterBudget
+    // MARK: - Budget editing
+
+    /// Effective character budget for the currently selected preset: the
+    /// stored per-preset override if one exists, else the preset's default.
+    private var effectiveBudget: Int {
+        controller.budgetOverride(for: controller.exportPreset) ?? controller.exportPreset.targetCharacterBudget
+    }
+
+    /// Text-field binding onto the controller's stored override. Typing a
+    /// positive integer sets the override; clearing the field (or entering
+    /// `0`) clears it, falling back to the preset default.
+    private var budgetTextBinding: Binding<String> {
+        Binding<String>(
+            get: { String(effectiveBudget) },
+            set: { newValue in
+                let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let parsed = Int(trimmed), parsed > 0 {
+                    controller.setBudgetOverride(parsed, for: controller.exportPreset)
+                } else {
+                    controller.setBudgetOverride(nil, for: controller.exportPreset)
+                }
+                regeneratePreview()
+            }
+        )
+    }
+
+    /// Stepper convenience onto the same stored override, in 500-character
+    /// increments. Stepping down to 0 clears the override.
+    private var budgetIntBinding: Binding<Int> {
+        Binding<Int>(
+            get: { effectiveBudget },
+            set: { newValue in
+                let clamped = max(0, newValue)
+                controller.setBudgetOverride(clamped == 0 ? nil : clamped, for: controller.exportPreset)
+                regeneratePreview()
+            }
+        )
+    }
+
+    // MARK: - Preview / budget feedback
+
+    private var isOverBudget: Bool {
+        !preview.isEmpty && preview.count > effectiveBudget
+    }
+
+    private var budgetFeedback: String {
+        guard !preview.isEmpty else {
+            return "Suggested budget: ~\(effectiveBudget) characters"
+        }
         let count = preview.count
-        let over = count > budget
-        let overBit = over ? " — current export is ~\(count) chars, over budget; consider splitting." : ""
-        return "Suggested budget: ~\(budget) characters\(overBit)"
+        if count > effectiveBudget {
+            return "Current export is ~\(count) characters — over the \(effectiveBudget) character budget by \(count - effectiveBudget)."
+        }
+        return "Current export is ~\(count) characters, within the \(effectiveBudget) character budget."
     }
 
     private func regeneratePreview() {
-        preview = Exporter.export(controller.currentExportRequest())
+        let request = controller.currentExportRequest()
+        preview = Exporter.export(request)
+        sliceCount = Exporter.exportSlices(request).count
+        splitStatus = nil
+    }
+
+    /// Splits the current export across multiple files sized to the
+    /// effective budget and saves each one via the controller's save panel.
+    /// If the export already fits in one slice, just reports that.
+    private func performSplit() {
+        let request = controller.currentExportRequest()
+        let slices = Exporter.exportSlices(request)
+        guard slices.count > 1 else {
+            splitStatus = "Export already fits in a single file; nothing to split."
+            return
+        }
+
+        let suggested = Exporter.suggestedFilename(for: request)
+        let ext = controller.exportFormat.fileExtension
+        let suffix = ".\(ext)"
+        let base = suggested.hasSuffix(suffix) ? String(suggested.dropLast(suffix.count)) : suggested
+
+        for (index, slice) in slices.enumerated() {
+            controller.saveReport(slice, suggestedName: "\(base)-part\(index + 1)\(suffix)")
+        }
+        splitStatus = "Saved \(slices.count) files."
     }
 }
 

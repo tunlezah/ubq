@@ -2,36 +2,59 @@ import SwiftUI
 import AppKit
 import UniFiBackupKit
 
-/// Top-level UI controller. Owns the loaded `Backup`, selection state,
-/// search text, and the async loading pipeline.
+/// Top-level UI controller. Owns the loaded `Backup`, an optional second
+/// backup for diffing, selection/search state, and the async loading
+/// pipeline. Heavy tree walks are precomputed once per load into
+/// `BackupIndex` so per-keystroke / per-render work stays O(1).
 @MainActor
 @Observable
 final class InspectorController {
-    // Loaded backup + lifecycle
-    var backup: Backup?
+    // MARK: Loaded backup + lifecycle
+    var backup: Backup? { didSet { rebuildIndexAndDerived() } }
     var loadError: FatalBackupError?
     var statsError: FatalBackupError?
     var isLoading: Bool = false
     var sourceURL: URL?
-    var recentFiles: [URL] = []
+    var recentFiles: [URL] = RecentFilesStore.urls()
 
-    // Selection
+    /// Optional second backup, used only for the Diff feature.
+    var secondaryBackup: Backup? { didSet { recomputeDiff() } }
+    var secondaryURL: URL?
+    var secondaryError: FatalBackupError?
+
+    /// URLs discovered by "Open autobackup folder…", newest first.
+    var folderBackups: [URL] = []
+
+    // MARK: Selection
     var selectionMode: Bool = false
     var selectedNodeIDs: Set<String> = []
     var selectedCategoryID: String?
     var focusedNodeID: String?
 
-    // Search
+    // MARK: Search
     var searchText: String = ""
 
-    // Export sheet
+    // MARK: Sheets
     var showExportSheet: Bool = false
+    var showDiagnostics: Bool = false
+    var showDiff: Bool = false
+    var showAudit: Bool = false
+    var showRestoreAdvisor: Bool = false
+    var showSecretInventory: Bool = false
+    var showFiles: Bool = false
+    var showStatistics: Bool = false
+
+    // MARK: Export options
     var exportFormat: ExportFormat = .markdown
     var exportPreset: LLMPreset = .claude
     var includeSecrets: Bool = false
+    var exportError: String?
 
-    // Diagnostics panel
-    var showDiagnostics: Bool = false
+    // MARK: Derived (precomputed per load)
+    private(set) var index = BackupIndex.empty
+    private(set) var crossRef: CrossReference?
+    private(set) var audit: ConfigAudit?
+    private(set) var diff: BackupDiff?
 
     // MARK: - File loading
 
@@ -41,97 +64,201 @@ final class InspectorController {
         panel.allowsOtherFileTypes = true
         panel.allowsMultipleSelection = false
         panel.prompt = "Open"
-        panel.message = "Choose a .unf backup file"
+        panel.message = "Choose a .unf, .unifi, or .supp backup file"
         if panel.runModal() == .OK, let url = panel.url {
             await open(url: url)
         }
     }
 
     func open(url: URL) async {
-        sourceURL = url
+        let resolved = RecentFilesStore.resolveForOpening(url)
+        defer { if resolved.needsScopeRelease { resolved.url.stopAccessingSecurityScopedResource() } }
+        let target = resolved.url
+
+        sourceURL = target
         isLoading = true
         loadError = nil
         defer { isLoading = false }
 
-        let result = await Task.detached(priority: .userInitiated) {
-            do {
-                let b = try Backup.open(url: url, loadStatistics: false)
-                return Result<Backup, FatalBackupError>.success(b)
-            } catch let err as FatalBackupError {
-                return .failure(err)
-            } catch {
-                return .failure(.io(String(describing: error)))
-            }
-        }.value
-
+        let result = await Self.loadDetached(url: target, loadStatistics: false)
         switch result {
         case .success(let b):
             backup = b
             selectedNodeIDs.removeAll()
             selectedCategoryID = b.tree.first?.id
-            addRecent(url)
+            focusedNodeID = nil
+            RecentFilesStore.add(url)
+            recentFiles = RecentFilesStore.urls()
         case .failure(let err):
             backup = nil
             loadError = err
         }
     }
 
+    /// Loads a second backup for diffing without disturbing the primary.
+    func openSecondary(url: URL) async {
+        let resolved = RecentFilesStore.resolveForOpening(url)
+        defer { if resolved.needsScopeRelease { resolved.url.stopAccessingSecurityScopedResource() } }
+        secondaryError = nil
+        isLoading = true
+        defer { isLoading = false }
+        let result = await Self.loadDetached(url: resolved.url, loadStatistics: false)
+        switch result {
+        case .success(let b):
+            secondaryBackup = b
+            secondaryURL = url
+        case .failure(let err):
+            secondaryError = err
+        }
+    }
+
+    func openSecondaryWithPanel() async {
+        let panel = NSOpenPanel()
+        panel.allowsOtherFileTypes = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Compare"
+        panel.message = "Choose a second backup to compare against"
+        if panel.runModal() == .OK, let url = panel.url {
+            await openSecondary(url: url)
+        }
+    }
+
+    func clearSecondary() {
+        secondaryBackup = nil
+        secondaryURL = nil
+        secondaryError = nil
+    }
+
+    /// Scans a folder for `.unf` autobackups, newest first (filenames embed a
+    /// trailing epoch-ms, so a reverse lexical sort is chronological).
+    func openFolderWithPanel() async {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Choose Folder"
+        panel.message = "Choose a folder of .unf autobackups"
+        guard panel.runModal() == .OK, let dir = panel.url else { return }
+        let began = dir.startAccessingSecurityScopedResource()
+        defer { if began { dir.stopAccessingSecurityScopedResource() } }
+        let contents = (try? FileManager.default.contentsOfDirectory(
+            at: dir, includingPropertiesForKeys: nil
+        )) ?? []
+        folderBackups = contents
+            .filter { $0.pathExtension.lowercased() == "unf" }
+            .sorted { $0.lastPathComponent > $1.lastPathComponent }
+    }
+
     func loadStatistics() async {
-        guard let current = backup, let url = current.sourceURL ?? sourceURL else { return }
-        _ = current
+        guard let current = backup else { return }
         isLoading = true
         statsError = nil
         defer { isLoading = false }
-        let result = await Task.detached(priority: .userInitiated) {
-            do {
-                let b = try Backup.open(url: url, loadStatistics: true)
-                return Result<Backup, FatalBackupError>.success(b)
-            } catch let err as FatalBackupError {
-                return .failure(err)
-            } catch {
-                return .failure(.io(String(describing: error)))
-            }
+        let result: Result<Backup, FatalBackupError> = await Task.detached(priority: .userInitiated) {
+            do { return .success(try current.loadingStatistics()) }
+            catch let err as FatalBackupError { return .failure(err) }
+            catch { return .failure(.io(String(describing: error))) }
         }.value
-
         switch result {
-        case .success(let updated):
-            backup = updated
-        case .failure(let err):
-            statsError = err
+        case .success(let updated): backup = updated
+        case .failure(let err): statsError = err
         }
     }
 
-    private func addRecent(_ url: URL) {
-        recentFiles.removeAll { $0 == url }
-        recentFiles.insert(url, at: 0)
-        if recentFiles.count > 8 { recentFiles.removeLast() }
+    private static func loadDetached(url: URL, loadStatistics: Bool) async -> Result<Backup, FatalBackupError> {
+        await Task.detached(priority: .userInitiated) {
+            do { return .success(try Backup.open(url: url, loadStatistics: loadStatistics)) }
+            catch let err as FatalBackupError { return .failure(err) }
+            catch { return .failure(.io(String(describing: error))) }
+        }.value
     }
 
-    // MARK: - Selection
+    // MARK: - Derived rebuild
+
+    private func rebuildIndexAndDerived() {
+        guard let b = backup else {
+            index = .empty; crossRef = nil; audit = nil; recomputeDiff(); return
+        }
+        index = BackupIndex(tree: b.tree)
+        crossRef = CrossReference(model: b.model)
+        audit = ConfigAudit.run(
+            model: b.model,
+            identity: b.identity,
+            isSecretField: { SecretVault.isSecret(fieldName: $0) }
+        )
+        recomputeDiff()
+    }
+
+    private func recomputeDiff() {
+        guard let a = backup, let b = secondaryBackup else { diff = nil; return }
+        diff = BackupDiff.compute(
+            left: a.model, leftIdentity: a.identity,
+            right: b.model, rightIdentity: b.identity,
+            isSecretField: { SecretVault.isSecret(fieldName: $0) }
+        )
+    }
+
+    var restoreAdvice: RestoreAdvisor.Advice? {
+        guard let b = backup else { return nil }
+        return RestoreAdvisor.advise(identity: b.identity, siteCount: b.model.sites.count)
+    }
+
+    // MARK: - Selection (O(1) via index)
 
     var selectedNodes: [TreeNode] {
-        guard let b = backup else { return [] }
-        let flat = TreeBuilder.flatten(b.tree)
-        return flat.filter { selectedNodeIDs.contains($0.id) && $0.rawDocument != nil }
+        index.orderedIDs
+            .filter { selectedNodeIDs.contains($0) }
+            .compactMap { index.node(for: $0) }
+            .filter { $0.rawDocument != nil }
     }
 
+    func node(for id: String) -> TreeNode? { index.node(for: id) }
+
     func toggle(_ node: TreeNode) {
-        if selectedNodeIDs.contains(node.id) {
-            selectedNodeIDs.remove(node.id)
-        } else {
-            selectedNodeIDs.insert(node.id)
-        }
-        // Also toggle descendants.
-        for desc in TreeBuilder.flatten(TreeBuilder.children(of: node)) {
-            if selectedNodeIDs.contains(node.id) {
-                selectedNodeIDs.insert(desc.id)
-            } else {
-                selectedNodeIDs.remove(desc.id)
-            }
-        }
+        let willSelect = !selectedNodeIDs.contains(node.id)
+        var affected = index.descendantIDs(of: node.id)
+        affected.insert(node.id)
+        if willSelect { selectedNodeIDs.formUnion(affected) }
+        else { selectedNodeIDs.subtract(affected) }
+    }
+
+    func selectAllVisible() {
+        selectedNodeIDs = Set(index.orderedIDs)
+    }
+
+    func clearSelection() { selectedNodeIDs.removeAll() }
+
+    // MARK: - Search (backed by a prebuilt per-node text index)
+
+    func matches(_ id: String, filter: String) -> Bool {
+        guard !filter.isEmpty else { return true }
+        return index.searchText(for: id)?.contains(filter) ?? false
+    }
+
+    // MARK: - Cross-reference navigation
+
+    /// Reveals and focuses the record with the given id, switching the sidebar
+    /// category so it is on screen.
+    func navigate(toId id: String) {
+        guard index.node(for: id) != nil else { return }
+        if let cat = index.topCategoryID(for: id) { selectedCategoryID = cat }
+        focusedNodeID = id
     }
 
     // MARK: - Export
+
+    func budgetOverride(for preset: LLMPreset) -> Int? {
+        let v = UserDefaults.standard.integer(forKey: Self.budgetKey(preset))
+        return v > 0 ? v : nil
+    }
+
+    func setBudgetOverride(_ value: Int?, for preset: LLMPreset) {
+        let key = Self.budgetKey(preset)
+        if let value, value > 0 { UserDefaults.standard.set(value, forKey: key) }
+        else { UserDefaults.standard.removeObject(forKey: key) }
+    }
+
+    private static func budgetKey(_ p: LLMPreset) -> String { "budgetOverride.\(p.rawValue)" }
 
     func currentExportRequest() -> ExportRequest {
         ExportRequest(
@@ -139,7 +266,8 @@ final class InspectorController {
             format: exportFormat,
             preset: exportPreset,
             includeSecrets: includeSecrets,
-            identity: backup?.identity
+            identity: backup?.identity,
+            budgetOverride: budgetOverride(for: exportPreset)
         )
     }
 
@@ -150,18 +278,39 @@ final class InspectorController {
         pb.setString(output, forType: .string)
     }
 
+    /// Saves the export, surfacing any write failure instead of swallowing it.
     func exportToFile() {
         let request = currentExportRequest()
         let suggested = Exporter.suggestedFilename(for: request)
         let output = Exporter.export(request)
-
         let panel = NSSavePanel()
         panel.nameFieldStringValue = suggested
         panel.canCreateDirectories = true
         panel.showsTagField = false
-        if panel.runModal() == .OK, let url = panel.url {
-            try? output.write(to: url, atomically: true, encoding: .utf8)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try output.write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            exportError = "Could not save export to \(url.lastPathComponent): \(error.localizedDescription)"
         }
+    }
+
+    /// Writes an arbitrary report string (diff / audit markdown) to a
+    /// user-chosen file, surfacing errors.
+    func saveReport(_ text: String, suggestedName: String) {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = suggestedName
+        panel.canCreateDirectories = true
+        panel.showsTagField = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do { try text.write(to: url, atomically: true, encoding: .utf8) }
+        catch { exportError = "Could not save \(url.lastPathComponent): \(error.localizedDescription)" }
+    }
+
+    func copyToPasteboard(_ text: String) {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(text, forType: .string)
     }
 
     // MARK: - App version
@@ -171,4 +320,72 @@ final class InspectorController {
         let b = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0"
         return "\(v) (\(b))"
     }
+}
+
+// MARK: - BackupIndex
+
+/// Precomputed, immutable lookups over a loaded tree so the UI never walks the
+/// whole tree per keystroke or per render.
+struct BackupIndex {
+    private let nodesByID: [String: TreeNode]
+    private let descendants: [String: Set<String>]
+    private let topCategory: [String: String]
+    private let searchIndex: [String: String]
+    let orderedIDs: [String]
+
+    static let empty = BackupIndex()
+
+    private init() {
+        nodesByID = [:]; descendants = [:]; topCategory = [:]
+        searchIndex = [:]; orderedIDs = []
+    }
+
+    init(tree: [TreeNode]) {
+        var nodesByID: [String: TreeNode] = [:]
+        var descendants: [String: Set<String>] = [:]
+        var topCategory: [String: String] = [:]
+        var searchIndex: [String: String] = [:]
+        var ordered: [String] = []
+
+        // Recursive walk that records nodes, ordering, per-node search text, the
+        // owning top-level category, and each node's descendant id set.
+        @discardableResult
+        func walk(_ node: TreeNode, currentTop: String?) -> Set<String> {
+            nodesByID[node.id] = node
+            ordered.append(node.id)
+
+            let top: String
+            if case .category = node { top = node.id } else { top = currentTop ?? node.id }
+            topCategory[node.id] = top
+
+            var text = node.title.lowercased()
+            if let raw = node.rawDocument {
+                for (k, v) in raw.pairs {
+                    text += " " + k.lowercased() + " " + v.displayString.lowercased()
+                }
+            }
+            searchIndex[node.id] = text
+
+            var kids = Set<String>()
+            for child in TreeBuilder.children(of: node) {
+                kids.insert(child.id)
+                kids.formUnion(walk(child, currentTop: top))
+            }
+            descendants[node.id] = kids
+            return kids
+        }
+
+        for root in tree { walk(root, currentTop: nil) }
+
+        self.nodesByID = nodesByID
+        self.descendants = descendants
+        self.topCategory = topCategory
+        self.searchIndex = searchIndex
+        self.orderedIDs = ordered
+    }
+
+    func node(for id: String) -> TreeNode? { nodesByID[id] }
+    func descendantIDs(of id: String) -> Set<String> { descendants[id] ?? [] }
+    func topCategoryID(for id: String) -> String? { topCategory[id] }
+    func searchText(for id: String) -> String? { searchIndex[id] }
 }
