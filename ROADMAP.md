@@ -13,6 +13,49 @@ the bottom. Companion docs: `RESEARCH.md` (phase-1 forensics, Dec 2025),
 
 ---
 
+## 0. Implementation status (this branch)
+
+Most of Tiers 1–2 and parts of Tier 3 below are now **implemented** on
+`claude/unifi-project-review-cpm6wb`:
+
+* **All §2 correctness fixes** — detectKind stats detection, expanded
+  SecretVault (all `x_` fields + full-collection inventory), Unassigned
+  bucket for orphaned records, persistent recents (security-scoped
+  bookmarks), error-surfacing exports, slice-safe ZIP/gzip indexing, and
+  the data-descriptor false-positive guard. Plus the performance rework
+  (a precomputed `BackupIndex` replacing per-access/per-render tree walks;
+  debounced, filtering search).
+* **Tier 1** — search that filters (⌘F, debounce, Escape), a real
+  Statistics view (Swift Charts), a Files browser over raw archive entries,
+  cross-reference links with back-links, and a names-only Secret Inventory.
+* **Tier 2** — Backup diff (+ autobackup-folder compare), Config Audit
+  report, Restore Advisor, CSV export, editable LLM budgets (refreshed to
+  Aug-2026 numbers) with split-into-N and Claude structured nesting.
+* **Tier 3 (partial)** — `.supp` support bundles (full), and `.unifi`
+  console (AES-256 → gzip → tar) container **detection + extract pipeline**
+  (see caveat).
+
+**Two honest caveats:**
+
+1. **Not compiled here.** This work was authored in an environment with no
+   Swift toolchain, so it is correct-by-construction and cross-reviewed but
+   **not compiler-verified**; the macOS CI is the gate. Expect the
+   possibility of minor SwiftUI/Charts compile nits to shake out on the
+   first CI run.
+2. **AES-256 `.unifi` key is a placeholder.** The console-container key
+   (`UnfCipher.unifiOSKey256`) could not be verified byte-for-byte, so it
+   ships as a placeholder gated by `unifiOSKey256Verified = false`. The
+   detect/gunzip/tar/parse pipeline is complete and activates the moment a
+   verified 32-byte key is pasted in and the flag flipped; until then the
+   shape is detected and reported rather than decrypted with bogus bytes.
+
+Still open (Tier 3+): controller connectivity (§5), CLI/MCP server,
+site-export/sanitised write-back, UCore Postgres decoding, sign+notarise
+release. The tiers below are the original plan; treat §0 as the "done"
+overlay on top of it.
+
+---
+
 ## 1. Where the project stands
 
 The foundation is strong and unusually well-documented:
