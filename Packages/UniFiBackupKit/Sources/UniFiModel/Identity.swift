@@ -130,7 +130,7 @@ public struct Identity: Hashable, Sendable, Codable {
         collectionNames: Set<String>,
         diagnostics: DiagnosticSink
     ) -> Kind {
-        let hasStats = entries.keys.contains { $0.hasSuffix("db_stat.gz") || $0 == "db_stat.gz" }
+        let hasStats = statsPresent(entries: entries, collectionNames: collectionNames)
         let hasAdmin = collectionNames.contains("admin")
         let hasAccount = collectionNames.contains("account")
         let hasSite = collectionNames.contains("site")
@@ -148,13 +148,47 @@ public struct Identity: Hashable, Sendable, Codable {
             diagnostics.emit(
                 .info,
                 .settingsOnlyDetected,
-                "This is a settings-only export (no db_stat.gz present)."
+                "This is a settings-only export (no statistics collections or files present)."
             )
             return .settingsOnly
         }
 
         if hasSite { return .full }
         return .unknown
+    }
+
+    /// Whether the backup carries any statistics, keyed off ZIP *entry names*
+    /// (which are present even when the stats streams are never decompressed) as
+    /// well as any loaded stat collections.
+    ///
+    /// Per-collection `.bson` full backups contain no `db_stat.gz`, so relying on
+    /// that single file misclassified them as settings-only. Treat any of the
+    /// following as a statistics-presence signal:
+    ///   * an entry whose basename is `db_stat.gz`,
+    ///   * an entry whose basename starts with `stat_` and ends `.bson`,
+    ///   * an entry whose basename starts with `event_archive` and ends `.bson`,
+    ///   * any loaded collection name starting with `stat_`.
+    static func statsPresent(
+        entries: [String: Data],
+        collectionNames: Set<String>
+    ) -> Bool {
+        let entrySignal = entries.keys.contains { key in
+            let base = basename(key)
+            if base == "db_stat.gz" { return true }
+            if base.hasPrefix("stat_") && base.hasSuffix(".bson") { return true }
+            if base.hasPrefix("event_archive") && base.hasSuffix(".bson") { return true }
+            return false
+        }
+        if entrySignal { return true }
+        return collectionNames.contains { $0.hasPrefix("stat_") }
+    }
+
+    /// Last path component of a (possibly `/`-separated) ZIP entry name.
+    static func basename(_ path: String) -> String {
+        if let slash = path.lastIndex(of: "/") {
+            return String(path[path.index(after: slash)...])
+        }
+        return path
     }
 
     // Strip BOM, CRLF, surrounding whitespace.

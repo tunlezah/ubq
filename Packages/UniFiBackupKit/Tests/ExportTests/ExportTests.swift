@@ -75,6 +75,129 @@ final class ExportTests: XCTestCase {
         XCTAssertTrue(nameSecret.hasSuffix(".md"))
     }
 
+    // MARK: - New coverage (ROADMAP §6 / Tier-2 #11)
+
+    func testCSVExportHasHeaderRowAndQuotesCommaCell() {
+        var doc = BSONDocument()
+        doc["_id"] = .string("w2")
+        doc["name"] = .string("Guest, Home")
+        doc["security"] = .string("wpapsk")
+        let node = TreeNode.wlan(WlanNode(id: "w2", title: "Guest, Home", raw: doc))
+
+        let request = ExportRequest(
+            nodes: [node], format: .csv, preset: .gpt,
+            includeSecrets: true
+        )
+        let out = Exporter.export(request)
+
+        // Comment line naming the collection, then a header row that's the
+        // union of field keys in first-seen (insertion) order.
+        XCTAssertTrue(out.contains("# wlan"))
+        XCTAssertTrue(out.contains("_id,name,security"))
+        // The comma-bearing cell is RFC-4180 quoted.
+        XCTAssertTrue(out.contains("\"Guest, Home\""))
+    }
+
+    func testBudgetOverrideChangesOverBudgetWarning() {
+        let node = makeWlanNode()
+
+        let defaultRequest = ExportRequest(
+            nodes: [node], format: .text, preset: .gpt,
+            includeSecrets: false
+        )
+        let defaultOut = Exporter.export(defaultRequest)
+        XCTAssertFalse(defaultOut.contains("exceeding the suggested budget"))
+
+        let overriddenRequest = ExportRequest(
+            nodes: [node], format: .text, preset: .gpt,
+            includeSecrets: false, budgetOverride: 10
+        )
+        let overriddenOut = Exporter.export(overriddenRequest)
+        XCTAssertTrue(overriddenOut.contains("exceeding the suggested budget"))
+        XCTAssertTrue(overriddenOut.contains("(~10)"))
+    }
+
+    func testExportSlicesSplitsWhenTinyBudgetOverrideForcesIt() {
+        let node1 = makeWlanNode()
+        var doc2 = BSONDocument()
+        doc2["_id"] = .string("w3")
+        doc2["name"] = .string("Second Network")
+        let node2 = TreeNode.wlan(WlanNode(id: "w3", title: "Second Network", raw: doc2))
+
+        // A single, unsplit export is one document.
+        let wholeRequest = ExportRequest(
+            nodes: [node1, node2], format: .markdown, preset: .gpt,
+            includeSecrets: false
+        )
+        XCTAssertEqual(Exporter.exportSlices(wholeRequest).count, 1)
+
+        // A budget too small for even one section per document forces a
+        // slice per top-level section.
+        let tinyRequest = ExportRequest(
+            nodes: [node1, node2], format: .markdown, preset: .gpt,
+            includeSecrets: false, budgetOverride: 200
+        )
+        let slices = Exporter.exportSlices(tinyRequest)
+        XCTAssertGreaterThan(slices.count, 1)
+        XCTAssertTrue(slices[0].contains("part 1 of \(slices.count)"))
+        guard let lastSlice = slices.last else {
+            XCTFail("expected at least one slice")
+            return
+        }
+        XCTAssertTrue(lastSlice.contains("part \(slices.count) of \(slices.count)"))
+    }
+
+    func testNestedSiteWithChildDeviceForClaude() {
+        var deviceDoc = BSONDocument()
+        deviceDoc["_id"] = .string("d1")
+        deviceDoc["name"] = .string("AP1")
+        let deviceNode = TreeNode.device(DeviceNode(id: "d1", title: "AP1", raw: deviceDoc))
+
+        let devicesCategory = TreeNode.siteChildCategory(
+            SiteChildCategory(siteId: "s1", kind: .devices, children: [deviceNode])
+        )
+
+        var siteDoc = BSONDocument()
+        siteDoc["_id"] = .string("s1")
+        siteDoc["name"] = .string("default")
+        let siteNode = TreeNode.site(
+            SiteNode(id: "s1", title: "Default Site", raw: siteDoc, children: [devicesCategory])
+        )
+
+        let request = ExportRequest(
+            nodes: [siteNode], format: .markdown, preset: .claude,
+            includeSecrets: false
+        )
+        let out = Exporter.export(request)
+
+        guard let openRange = out.range(of: "<site"),
+              let closeRange = out.range(of: "</site>") else {
+            XCTFail("expected a <site>...</site> block")
+            return
+        }
+        let siteBlock = out[openRange.lowerBound..<closeRange.upperBound]
+        XCTAssertTrue(siteBlock.contains("<device"))
+        XCTAssertTrue(siteBlock.contains("</device>"))
+    }
+
+    func testRecordSelectedWithoutParentStaysTopLevel() {
+        // A device selected on its own (no enclosing .site in the selection)
+        // still exports flat, same as a lone WLAN does.
+        var deviceDoc = BSONDocument()
+        deviceDoc["_id"] = .string("d2")
+        deviceDoc["name"] = .string("AP2")
+        let deviceNode = TreeNode.device(DeviceNode(id: "d2", title: "AP2", raw: deviceDoc))
+
+        let request = ExportRequest(
+            nodes: [deviceNode], format: .markdown, preset: .claude,
+            includeSecrets: false
+        )
+        let out = Exporter.export(request)
+        XCTAssertTrue(out.contains("<device"))
+        XCTAssertTrue(out.contains("</device>"))
+        XCTAssertFalse(out.contains("<site"))
+    }
+
     // MARK: - Fixtures
 
     private func makeWlanNode() -> TreeNode {

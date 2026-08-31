@@ -3,60 +3,137 @@ import UniFiBackupKit
 
 /// Middle-pane outline view. Hierarchical, disclosable, with optional
 /// selection checkboxes when `controller.selectionMode` is on.
+///
+/// Search (ROADMAP Tier-1 #2): rather than dimming non-matching rows, the
+/// filter *hides* them. A node stays visible when it matches the query
+/// itself, or when any descendant does (so the ancestor chain down to a
+/// match is always reachable). The match test is `controller.matches(_:filter:)`,
+/// which is backed by `BackupIndex`'s prebuilt per-node search text — O(1) per
+/// node — so filtering the whole tree is a single O(n) pass, never a
+/// per-keystroke `rawDocument` scan and never a `TreeBuilder.flatten` re-walk.
 struct OutlinePane: View {
     @Bindable var controller: InspectorController
+
+    /// The search text, ~150ms after the user stops typing. Filtering reads
+    /// this instead of `controller.searchText` directly so keystrokes never
+    /// trigger a tree-wide recompute.
+    @State private var debounced: String = ""
 
     var body: some View {
         VStack(spacing: 0) {
             if controller.backup == nil && controller.loadError == nil {
                 EmptyState()
-            } else if let _ = controller.backup {
+            } else if let backup = controller.backup {
                 OutlineSearchField(text: $controller.searchText)
-                List(selection: $controller.focusedNodeID) {
-                    ForEach(topLevelNodes, id: \.id) { node in
-                        OutlineRow(
-                            controller: controller,
-                            node: node,
-                            depth: 0,
-                            filter: controller.searchText.lowercased()
-                        )
+                if backup.isSupportBundle && backup.tree.isEmpty {
+                    SupportBundleNote()
+                } else {
+                    List(selection: $controller.focusedNodeID) {
+                        ForEach(topLevelNodes, id: \.id) { node in
+                            OutlineRow(
+                                controller: controller,
+                                node: node,
+                                visibleIDs: visibleIDs
+                            )
+                        }
+                    }
+                    .listStyle(.sidebar)
+                    .overlay {
+                        if isFiltering && topLevelNodes.isEmpty {
+                            NoMatchesHint()
+                        }
                     }
                 }
-                .listStyle(.sidebar)
             } else if let err = controller.loadError {
                 ErrorState(error: err, onRetry: {
                     Task { await controller.openWithPanel() }
                 })
             }
         }
+        .task(id: controller.searchText) {
+            // Debounce: wait for a quiet period before adopting the new text.
+            try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled else { return }
+            debounced = controller.searchText
+        }
     }
+
+    private var isFiltering: Bool { !debounced.isEmpty }
 
     private var topLevelNodes: [TreeNode] {
         guard let tree = controller.backup?.tree else { return [] }
-        let selectedCat = controller.selectedCategoryID
-        if let selectedCat, let match = tree.first(where: { $0.id == selectedCat }) {
-            return TreeBuilder.children(of: match)
+        let base: [TreeNode]
+        if let selectedCat = controller.selectedCategoryID,
+           let match = tree.first(where: { $0.id == selectedCat }) {
+            base = TreeBuilder.children(of: match)
+        } else {
+            base = tree.flatMap { TreeBuilder.children(of: $0) }
         }
-        return tree.flatMap { TreeBuilder.children(of: $0) }
+        guard let visibleIDs else { return base }
+        return base.filter { visibleIDs.contains($0.id) }
+    }
+
+    /// The set of node ids that should be shown for the current filter, or
+    /// `nil` when there is no active filter (everything shows). A node is
+    /// included when it matches directly, or when it is an ancestor of a
+    /// node that does. Computed from `controller.index` — the prebuilt
+    /// `orderedIDs` / `descendantIDs` lookups — never by re-walking the tree.
+    private var visibleIDs: Set<String>? {
+        guard isFiltering else { return nil }
+        let filter = debounced.lowercased()
+        let index = controller.index
+
+        var direct = Set<String>()
+        for id in index.orderedIDs where controller.matches(id, filter: filter) {
+            direct.insert(id)
+        }
+        guard !direct.isEmpty else { return direct }
+
+        var visible = direct
+        for id in index.orderedIDs where !visible.contains(id) {
+            if !index.descendantIDs(of: id).isDisjoint(with: direct) {
+                visible.insert(id)
+            }
+        }
+        return visible
     }
 }
 
-struct OutlineRow: View {
+private struct OutlineRow: View {
     @Bindable var controller: InspectorController
     let node: TreeNode
-    let depth: Int
-    let filter: String
+    /// `nil` when unfiltered; otherwise the full set of node ids currently
+    /// visible in the tree (see `OutlinePane.visibleIDs`).
+    let visibleIDs: Set<String>?
+
+    /// Manual expand/collapse state, remembered per row across a live filter
+    /// coming and going. While filtering, expansion is forced open instead
+    /// (see `isExpandedBinding`) so a match is never hidden behind a
+    /// collapsed disclosure the user never touched.
+    @State private var expanded: Bool = false
 
     private var children: [TreeNode] { TreeBuilder.children(of: node) }
 
+    private var visibleChildren: [TreeNode] {
+        guard let visibleIDs else { return children }
+        return children.filter { visibleIDs.contains($0.id) }
+    }
+
+    private var isExpandedBinding: Binding<Bool> {
+        Binding(
+            get: { visibleIDs != nil ? true : expanded },
+            set: { expanded = $0 }
+        )
+    }
+
     var body: some View {
         Group {
-            if children.isEmpty {
+            if visibleChildren.isEmpty {
                 row
             } else {
-                DisclosureGroup {
-                    ForEach(children, id: \.id) { child in
-                        OutlineRow(controller: controller, node: child, depth: depth + 1, filter: filter)
+                DisclosureGroup(isExpanded: isExpandedBinding) {
+                    ForEach(visibleChildren, id: \.id) { child in
+                        OutlineRow(controller: controller, node: child, visibleIDs: visibleIDs)
                     }
                 } label: {
                     row
@@ -82,31 +159,21 @@ struct OutlineRow: View {
                 .truncationMode(.middle)
             Spacer()
         }
-        .opacity(matchesFilter ? 1.0 : 0.35)
         .contentShape(Rectangle())
-    }
-
-    private var matchesFilter: Bool {
-        guard !filter.isEmpty else { return true }
-        if node.title.lowercased().contains(filter) { return true }
-        if let raw = node.rawDocument {
-            for (k, v) in raw.pairs {
-                if k.lowercased().contains(filter) { return true }
-                if v.displayString.lowercased().contains(filter) { return true }
-            }
-        }
-        return false
     }
 }
 
-struct OutlineSearchField: View {
+private struct OutlineSearchField: View {
     @Binding var text: String
+    @FocusState private var isFocused: Bool
+
     var body: some View {
         HStack {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(.secondary)
             TextField("Search everything…", text: $text)
                 .textFieldStyle(.plain)
+                .focused($isFocused)
             if !text.isEmpty {
                 Button { text = "" } label: {
                     Image(systemName: "xmark.circle.fill")
@@ -118,10 +185,54 @@ struct OutlineSearchField: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
         .background(.regularMaterial)
+        // The window's ⌘F command (owned elsewhere) posts this notification;
+        // we just need to become first responder when it arrives.
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("focusSearch"))) { _ in
+            isFocused = true
+        }
+        // Escape clears the query first, then relinquishes focus on a second press.
+        .onExitCommand {
+            if !text.isEmpty {
+                text = ""
+            } else {
+                isFocused = false
+            }
+        }
     }
 }
 
-struct EmptyState: View {
+private struct NoMatchesHint: View {
+    var body: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.title2)
+                .foregroundStyle(.secondary)
+            Text("No matches")
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(.regularMaterial)
+        .allowsHitTesting(false)
+    }
+}
+
+private struct SupportBundleNote: View {
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "shippingbox")
+                .font(.system(size: 40, weight: .thin))
+                .foregroundStyle(.secondary)
+            Text("Support bundle — no configuration to browse; see Files/Diagnostics")
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 24)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(.regularMaterial)
+    }
+}
+
+private struct EmptyState: View {
     var body: some View {
         VStack(spacing: 16) {
             Image(systemName: "doc.badge.arrow.up")
@@ -135,7 +246,7 @@ struct EmptyState: View {
     }
 }
 
-struct ErrorState: View {
+private struct ErrorState: View {
     let error: FatalBackupError
     var onRetry: () -> Void
     var body: some View {

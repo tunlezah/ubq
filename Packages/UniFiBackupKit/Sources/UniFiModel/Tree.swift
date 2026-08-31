@@ -400,6 +400,14 @@ public enum TreeBuilder {
             )))
         }
 
+        // Unassigned — records whose site_id is nil or points at a site not
+        // present in this backup. Without this bucket they would be silently
+        // invisible: absent from the tree and therefore not exportable, which
+        // contradicts the project's "surface data, never silently lose it" rule.
+        if let unassigned = buildUnassignedCategory(m) {
+            cats.append(unassigned)
+        }
+
         // Admins (controller-wide).
         if !m.admins.isEmpty {
             let children = m.admins.map { a in
@@ -462,6 +470,148 @@ public enum TreeBuilder {
         }
 
         return cats
+    }
+
+    /// Builds the "Unassigned" top-level category from every site-scoped record
+    /// whose `siteId` is nil or references a site absent from this backup.
+    /// Records are grouped by type using the existing `SiteChildCategory` kinds
+    /// (port-forwards, firewall rules/groups and routing share the `.firewall`
+    /// grouping, matching the per-site layout). Returns nil when nothing is
+    /// orphaned, so the category only appears when it has children.
+    private static func buildUnassignedCategory(_ m: ModelMapper.MappedModel) -> TreeNode? {
+        let validSiteIds = Set(m.sites.map(\.id))
+        func isOrphan(_ siteId: String?) -> Bool {
+            guard let siteId, validSiteIds.contains(siteId) else { return true }
+            return false
+        }
+
+        let unassignedSiteId = "unassigned"
+        var groups: [TreeNode] = []
+        var total = 0
+
+        let devices = m.devices.filter { isOrphan($0.siteId) }
+        if !devices.isEmpty {
+            total += devices.count
+            groups.append(.siteChildCategory(SiteChildCategory(
+                siteId: unassignedSiteId, kind: .devices,
+                children: devices.map { d in
+                    .device(DeviceNode(
+                        id: d.id,
+                        title: [d.name, d.mac, d.model].compactMap { $0 }.joined(separator: " · "),
+                        raw: d.rawDocument
+                    ))
+                }
+            )))
+        }
+
+        let wlans = m.wlans.filter { isOrphan($0.siteId) }
+        if !wlans.isEmpty {
+            total += wlans.count
+            groups.append(.siteChildCategory(SiteChildCategory(
+                siteId: unassignedSiteId, kind: .wlans,
+                children: wlans.map { w in
+                    .wlan(WlanNode(id: w.id, title: w.name ?? "(unnamed)", raw: w.rawDocument))
+                }
+            )))
+        }
+
+        let networks = m.networks.filter { isOrphan($0.siteId) }
+        if !networks.isEmpty {
+            total += networks.count
+            groups.append(.siteChildCategory(SiteChildCategory(
+                siteId: unassignedSiteId, kind: .networks,
+                children: networks.map { n in
+                    .network(NetworkNode(
+                        id: n.id,
+                        title: [n.name, n.ipSubnet].compactMap { $0 }.joined(separator: " · "),
+                        raw: n.rawDocument
+                    ))
+                }
+            )))
+        }
+
+        let fwRules = m.firewallRules.filter { isOrphan($0.siteId) }
+        let fwGroups = m.firewallGroups.filter { isOrphan($0.siteId) }
+        let portForwards = m.portForwards.filter { isOrphan($0.siteId) }
+        let routing = m.routing.filter { isOrphan($0.siteId) }
+        if !fwRules.isEmpty || !fwGroups.isEmpty || !portForwards.isEmpty || !routing.isEmpty {
+            total += fwRules.count + fwGroups.count + portForwards.count + routing.count
+            var fwKids: [TreeNode] = []
+            fwKids.append(contentsOf: fwRules.map { r in
+                TreeNode.firewallRule(FirewallRuleNode(
+                    id: r.id,
+                    title: [r.ruleset, r.name].compactMap { $0 }.joined(separator: " · "),
+                    raw: r.rawDocument
+                ))
+            })
+            fwKids.append(contentsOf: fwGroups.map { g in
+                TreeNode.firewallGroup(FirewallGroupNode(
+                    id: g.id,
+                    title: [g.groupType, g.name].compactMap { $0 }.joined(separator: " · "),
+                    raw: g.rawDocument
+                ))
+            })
+            fwKids.append(contentsOf: portForwards.map { p in
+                TreeNode.portForward(PortForwardNode(
+                    id: p.id,
+                    title: p.name ?? "(unnamed)",
+                    raw: p.rawDocument
+                ))
+            })
+            fwKids.append(contentsOf: routing.map { r in
+                TreeNode.routing(RoutingNode(
+                    id: r.id,
+                    title: r.name ?? "(unnamed route)",
+                    raw: r.rawDocument
+                ))
+            })
+            groups.append(.siteChildCategory(SiteChildCategory(
+                siteId: unassignedSiteId, kind: .firewall, children: fwKids
+            )))
+        }
+
+        let portProfiles = m.portProfiles.filter { isOrphan($0.siteId) }
+        if !portProfiles.isEmpty {
+            total += portProfiles.count
+            groups.append(.siteChildCategory(SiteChildCategory(
+                siteId: unassignedSiteId, kind: .portProfiles,
+                children: portProfiles.map { p in
+                    .portProfile(PortProfileNode(id: p.id, title: p.name ?? "(unnamed)", raw: p.rawDocument))
+                }
+            )))
+        }
+
+        let clients = m.clients.filter { isOrphan($0.siteId) }
+        if !clients.isEmpty {
+            total += clients.count
+            groups.append(.siteChildCategory(SiteChildCategory(
+                siteId: unassignedSiteId, kind: .clients,
+                children: clients.map { c in
+                    .client(ClientNode(
+                        id: c.id,
+                        title: [c.name, c.hostname, c.mac].compactMap { $0 }.joined(separator: " · "),
+                        raw: c.rawDocument
+                    ))
+                }
+            )))
+        }
+
+        let settings = m.settings.filter { isOrphan($0.siteId) }
+        if !settings.isEmpty {
+            total += settings.count
+            groups.append(.siteChildCategory(SiteChildCategory(
+                siteId: unassignedSiteId, kind: .settings,
+                children: settings.map { s in
+                    .setting(SettingNode(id: s.id, title: s.key ?? "(setting)", raw: s.rawDocument))
+                }
+            )))
+        }
+
+        guard !groups.isEmpty else { return nil }
+        return .category(CategoryNode(
+            id: "unassigned", title: "Unassigned", symbolName: "questionmark.folder",
+            badge: total, children: groups
+        ))
     }
 
     /// Walks a tree to produce a flat list of all nodes — used by the outline

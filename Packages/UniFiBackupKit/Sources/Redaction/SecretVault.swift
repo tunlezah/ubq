@@ -14,6 +14,12 @@ public enum SecretVault {
         "x_cert",
         "x_ca_crts",
         "x_ssh_keys",
+        "x_authkey",
+        "x_adopt_password",
+        "x_ssh_password",
+        "x_ipsec_pre_shared_key",
+        "x_wireguard_private_key",
+        "x_wpa_psk",
         "secret",
         "api_key",
         "apiKey",
@@ -37,6 +43,22 @@ public enum SecretVault {
         "passwd"
     ]
 
+    /// `x_`-prefixed fields that are safe to leave in the clear. UniFi uses the
+    /// `x_` prefix to mark fields excluded from its own API responses because
+    /// they are sensitive, so we redact any `x_` field by default and carve out
+    /// only the clearly-benign ones here. Err toward redacting: keep this small.
+    public static let benignXFields: Set<String> = [
+        "x_vlan"
+    ]
+
+    /// Whether a BSON field name should be treated as a secret. True when the
+    /// name is in the explicit registry, or when it carries UniFi's `x_`
+    /// sensitive-field prefix and is not in the benign allowlist.
+    public static func isSecret(fieldName name: String) -> Bool {
+        if secretFieldNames.contains(name) { return true }
+        return name.hasPrefix("x_") && !benignXFields.contains(name)
+    }
+
     /// Returns a Set of fully-qualified field paths ("setting.mgmt.x_ssh_keys"
     /// etc.) where secrets are found within a document. Used by the UI to
     /// display "this record contains N secrets" summaries.
@@ -44,7 +66,7 @@ public enum SecretVault {
         var paths: [String] = []
         for (key, value) in doc.pairs {
             let path = prefix.isEmpty ? key : "\(prefix).\(key)"
-            if secretFieldNames.contains(key) {
+            if isSecret(fieldName: key) {
                 paths.append(path)
             }
             switch value {
@@ -68,7 +90,7 @@ public enum SecretVault {
     public static func redact(_ doc: BSONDocument) -> BSONDocument {
         var out = BSONDocument()
         for (key, value) in doc.pairs {
-            if secretFieldNames.contains(key) {
+            if isSecret(fieldName: key) {
                 out[key] = .string("<redacted>")
             } else {
                 switch value {
@@ -104,7 +126,16 @@ public enum SecretVault {
                 }
             }
         }
+        tally(model.sites.map(\.rawDocument), under: "site")
+        tally(model.devices.map(\.rawDocument), under: "device")
+        tally(model.clients.map(\.rawDocument), under: "user")
         tally(model.wlans.map(\.rawDocument), under: "wlanconf")
+        tally(model.networks.map(\.rawDocument), under: "networkconf")
+        tally(model.portProfiles.map(\.rawDocument), under: "portconf")
+        tally(model.portForwards.map(\.rawDocument), under: "portforward")
+        tally(model.firewallRules.map(\.rawDocument), under: "firewallrule")
+        tally(model.firewallGroups.map(\.rawDocument), under: "firewallgroup")
+        tally(model.routing.map(\.rawDocument), under: "routing")
         tally(model.admins.map(\.rawDocument), under: "admin")
         tally(model.accounts.map(\.rawDocument), under: "account")
         tally(model.radiusProfiles.map(\.rawDocument), under: "radiusprofile")

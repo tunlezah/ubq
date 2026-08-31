@@ -6,16 +6,35 @@ JSON, or Markdown — shaped for pasting into an LLM.
 
 * **Local-first.** No network calls. No telemetry. No crash reporting.
   Your WPA keys stay on your machine.
-* **Reads every version.** UniFi Network Application v5.10 through v9.5.21+
-  share one static AES-128-CBC key; a single parser covers them all.
+* **Reads every version.** UniFi Network Application v5.x through v10.x
+  share one static AES-128-CBC key; a single parser covers them all. Also
+  reads `.supp` support bundles and `.unifi` UniFi OS console backups
+  (plain-ZIP shapes; the AES-256 console shape is detected — see below).
 * **Nothing to crash.** Malformed ZIP, truncated gzip, unknown collections —
   each surfaces as a structured diagnostic. The parser never crashes on
   bad input.
+* **Compare two backups.** A full config diff — devices, WLANs, networks,
+  firewall rules, settings — added / removed / changed, exportable as a
+  report. Open a folder of autobackups and compare adjacent snapshots.
+* **Audit your config offline.** A security/hygiene lint flags open/WEP
+  WLANs, weak PSKs, management-port forwards, any/any firewall accepts,
+  missing 2FA, and restore-safety pitfalls — no network required.
+* **Restore Advisor.** Tells you the minimum controller version a backup
+  restores into (forward-only) and warns when a full backup would import
+  only the Default site on a UniFi OS console.
+* **Browse everything.** Statistics get their own view with throughput and
+  client-count charts; a Files browser surfaces `system.properties`,
+  `sites/`, and other raw archive entries; cross-references resolve to
+  clickable named links with back-links.
 * **Selectively export for AI analysis.** Per-LLM presets (Claude, GPT,
-  Gemini, local) bias Markdown/JSON/text output at export time.
-* **Default-redacted.** PSKs, admin hashes, RADIUS secrets, TOTP secrets
-  are redacted by default. Reveal-in-UI is one click; exporting with
-  secrets shows an unmissable red warning banner.
+  Gemini, local) with **editable, up-to-date token budgets** bias
+  Markdown / JSON / text / **CSV** output, with structured nesting for
+  Claude and a split-into-N-files action for large selections.
+* **Default-redacted.** PSKs, admin hashes, RADIUS secrets, TOTP secrets,
+  and every `x_`-prefixed field are redacted by default. Reveal-in-UI is
+  one click; exporting with secrets shows an unmissable red warning banner.
+  A names-only Secret Inventory shows what's in the file without exposing
+  values.
 
 ## Screenshots
 
@@ -28,9 +47,11 @@ See `DESIGN.md` for the full layout spec.
 
 | Controller | Status | Notes |
 |---|---|---|
-| UniFi Network Application v5.x — v9.x | ✅ full support | Static AES key unchanged; parser verified against public tools. |
+| UniFi Network Application v5.x — v10.x | ✅ full support | Static AES-128 key unchanged; parser handles both the legacy single-`db.gz` stream and per-collection `.bson` layouts. |
 | Legacy v3.x / v4.x | ⚠️ best-effort | Schema is older; some collections may surface as opaque. |
-| UniFi OS `.unifi` console backup | ❌ out of scope (detected + labelled) | Wraps a `.unf` plus UCore PostgreSQL; handle the Network export separately (Settings → System → Advanced). |
+| `.supp` support bundle | ✅ browse | Same AES-128 key as `.unf`; no config DB, so the raw archive (logs, `support_info.json`, `devices/`) is shown for browsing. |
+| UniFi OS `.unifi` — plain-ZIP shapes | ✅ full support | Embedded `.unf`, or an inline unencrypted Network payload; parsed in place. |
+| UniFi OS `.unifi` — AES-256 console shape | ⚠️ detected, decryption key pending | The IV-prepended AES-256 → gzip → tar console container is recognised and its shape reported; the full extract pipeline is implemented but gated on a verified 32-byte key (see Limitations). |
 | UniFi Protect `.ubv` | ❌ not a backup | Raw video files; we don't touch them. |
 
 ## Install
@@ -86,23 +107,32 @@ open /Applications/UnifiBackupInspector.app
 
 | Shortcut | Action |
 |---|---|
-| ⌘O | Open a `.unf` file |
+| ⌘O | Open a `.unf` / `.unifi` / `.supp` file |
 | ⌘F | Focus search |
 | ⌘⇧E | Open export sheet |
+| ⌘⇧D | Compare against another backup |
 | ⌘⌥S | Toggle selection mode |
 | Space | Expand / collapse node |
 | Arrow keys | Navigate outline |
 
 ## Limitations
 
-* **No restore.** The app is read-only.
-* **No `.unifi` parsing.** Detected, labelled, refused — extract the
-  inner `.unf` from Network → System → Advanced first. Planned for v2.
-* **Statistics not loaded by default.** Click "Load statistics…" in the
-  sidebar to decompress `db_stat.gz`. Large controllers' stat databases
-  can be hundreds of MB.
-* **No writing / round-trip.** Exports are one-way. Editing `.unf` is
-  genuinely unsolved (see zhangyoufu/unifi-backup-decrypt#2).
+* **No restore / no writing.** The app is read-only; exports are one-way.
+  Site-scoped round-trip (re-encrypting a modified backup) is feasible in
+  principle (see `ROADMAP.md` §3.5) but not implemented here.
+* **AES-256 `.unifi` console backups: key pending.** The IV-prepended
+  AES-256 console container is detected and its shape reported, but the
+  32-byte static key is a **placeholder pending verification**
+  (`UnfCipher.unifiOSKey256`, gated by `unifiOSKey256Verified`). Until a
+  real console file confirms the exact bytes, this shape reports "key
+  pending verification" rather than decrypting with unverified bytes (a
+  wrong key silently yields garbage). Plain-ZIP `.unifi` files work today.
+* **UCore PostgreSQL not parsed.** Inside a console `.unifi`, the
+  `backup/ucore/` `pg_dump` is kept raw for browsing/export, not decoded.
+* **Statistics not loaded by default.** Use the Statistics view (or
+  "Load statistics…") to decompress `db_stat.gz` / `stat_*.bson`. Large
+  controllers' stat databases can be hundreds of MB; loading reuses the
+  already-decrypted archive (no re-read / re-decrypt).
 
 ## Security model
 
@@ -213,4 +243,4 @@ not affiliated with, endorsed by, or sponsored by Ubiquiti Inc.
 
 ## License
 
-MIT. See `LICENSE` (to be added in a subsequent commit).
+MIT. See [`LICENSE`](LICENSE).
