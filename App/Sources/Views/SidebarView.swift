@@ -31,22 +31,52 @@ struct SidebarView: View {
 
             if let b = controller.backup {
                 Section("Overview") {
-                    LabelledRow(title: "Sites", value: "\(b.model.sites.count)", symbol: "house")
-                    LabelledRow(title: "Devices", value: "\(b.model.devices.count)", symbol: "antenna.radiowaves.left.and.right")
-                    LabelledRow(title: "WLANs", value: "\(b.model.wlans.count)", symbol: "wifi")
-                    LabelledRow(title: "Networks", value: "\(b.model.networks.count)", symbol: "network")
-                    LabelledRow(title: "Firewall rules", value: "\(b.model.firewallRules.count)", symbol: "shield")
-                    LabelledRow(title: "Admins", value: "\(b.model.admins.count)", symbol: "person.badge.key")
-                    Button {
-                        controller.showSecretInventory = true
-                    } label: {
-                        LabelledRow(
-                            title: "Secrets",
-                            value: "\(b.secretInventory.values.reduce(0, +))",
-                            symbol: "key.viewfinder"
-                        )
-                    }
-                    .buttonStyle(.plain)
+                    // Sites / Admins jump to their structural category; the rest
+                    // apply a flat, cross-site entity filter to the middle pane.
+                    OverviewButton(
+                        title: "Sites", count: b.model.sites.count, symbol: "house",
+                        isActive: controller.selectedCategoryID == "sites" && controller.entityFilter == nil
+                    ) { controller.selectedCategoryID = "sites" }
+
+                    OverviewButton(
+                        title: "Devices", count: b.model.devices.count,
+                        symbol: EntityFilter.devices.symbol,
+                        isActive: controller.entityFilter == .devices
+                    ) { controller.entityFilter = .devices; controller.selectedCategoryID = nil }
+
+                    OverviewButton(
+                        title: "WLANs", count: b.model.wlans.count,
+                        symbol: EntityFilter.wlans.symbol,
+                        isActive: controller.entityFilter == .wlans
+                    ) { controller.entityFilter = .wlans; controller.selectedCategoryID = nil }
+
+                    OverviewButton(
+                        title: "Networks", count: b.model.networks.count,
+                        symbol: EntityFilter.networks.symbol,
+                        isActive: controller.entityFilter == .networks
+                    ) { controller.entityFilter = .networks; controller.selectedCategoryID = nil }
+
+                    OverviewButton(
+                        title: "Firewall", count: b.model.firewallRules.count,
+                        symbol: EntityFilter.firewall.symbol,
+                        isActive: controller.entityFilter == .firewall
+                    ) { controller.entityFilter = .firewall; controller.selectedCategoryID = nil }
+
+                    OverviewButton(
+                        title: "Clients", count: b.model.clients.count,
+                        symbol: EntityFilter.clients.symbol,
+                        isActive: controller.entityFilter == .clients
+                    ) { controller.entityFilter = .clients; controller.selectedCategoryID = nil }
+
+                    OverviewButton(
+                        title: "Admins", count: b.model.admins.count, symbol: "person.badge.key",
+                        isActive: controller.selectedCategoryID == "admins" && controller.entityFilter == nil
+                    ) { controller.selectedCategoryID = "admins" }
+
+                    OverviewButton(
+                        title: "Secrets", count: b.secretInventory.values.reduce(0, +),
+                        symbol: "key.viewfinder", isActive: false
+                    ) { controller.showSecretInventory = true }
                 }
 
                 if let note = b.containerNote {
@@ -153,16 +183,29 @@ struct SidebarView: View {
     }
 }
 
-private struct LabelledRow: View {
+/// A tappable Overview row: an SF-Symbol label, a trailing count, and an action.
+/// Disabled when the count is zero. Highlights when its destination is active.
+private struct OverviewButton: View {
     let title: String
-    let value: String
+    let count: Int
     let symbol: String
+    let isActive: Bool
+    let action: () -> Void
+
     var body: some View {
-        HStack {
-            Label(title, systemImage: symbol)
-            Spacer()
-            Text(value).foregroundStyle(.secondary)
+        Button(action: action) {
+            HStack {
+                Label(title, systemImage: symbol)
+                Spacer()
+                Text("\(count)")
+                    .foregroundStyle(.secondary)
+            }
+            .font(.caption)
+            .fontWeight(isActive ? .semibold : .regular)
+            .foregroundStyle(isActive ? Color.accentColor : Color.primary)
+            .contentShape(Rectangle())
         }
-        .font(.caption)
+        .buttonStyle(.plain)
+        .disabled(count == 0)
     }
 }
