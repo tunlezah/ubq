@@ -111,14 +111,30 @@ final class UnfCryptoTests: XCTestCase {
         XCTAssertThrowsError(try UnfCipher.decryptAES256CBC(blob, key: key, ivPrepended: false))
     }
 
-    func testAES256ConsoleKeyIsUnverifiedPlaceholder() {
-        // The AES-256 console key ships as a placeholder pending verification;
-        // the loader must refuse to decrypt with it until confirmed. See
-        // UnfCipher.unifiOSKey256 for the TODO(key) and sourcing.
-        XCTAssertFalse(
+    func testAES256ConsoleKeyIsVerifiedAndMatchesKnownValue() {
+        // The AES-256 console key is verified and enabled. Lock the exact 32
+        // bytes (confirmed across four independent implementations — see
+        // UnfCipher.unifiOSKey256Hex); do not mutate without an ADR.
+        XCTAssertTrue(
             UnfCipher.unifiOSKey256Verified,
-            "The AES-256 console key must remain gated until the real 32 bytes are verified."
+            "The AES-256 console path should be enabled now the key is verified."
         )
-        XCTAssertEqual(UnfCipher.unifiOSKey256.count, 32)
+        XCTAssertEqual(UnfCipher.unifiOSKey256.count, 32, "decodeHex must yield 32 bytes")
+        XCTAssertEqual(
+            Data(UnfCipher.unifiOSKey256),
+            Data([
+                0xe3, 0x83, 0xb7, 0xc5, 0x36, 0x98, 0xb3, 0x6d,
+                0x4b, 0xae, 0xa4, 0xed, 0x22, 0x18, 0x1e, 0xf7,
+                0x36, 0x76, 0xbf, 0xd5, 0xd5, 0xb9, 0x00, 0x05,
+                0xd9, 0x84, 0x5f, 0xfd, 0x5d, 0xce, 0x98, 0x5f,
+            ]),
+            "AES-256 console key must match the verified UniFi OS value."
+        )
+    }
+
+    func testDecodeHexRoundTrips() {
+        XCTAssertEqual(UnfCipher.decodeHex("00ff10"), [0x00, 0xff, 0x10])
+        XCTAssertEqual(UnfCipher.decodeHex("zz"), [])   // invalid → empty
+        XCTAssertEqual(UnfCipher.decodeHex("abc"), [])  // odd length → empty
     }
 }

@@ -51,7 +51,7 @@ See `DESIGN.md` for the full layout spec.
 | Legacy v3.x / v4.x | ⚠️ best-effort | Schema is older; some collections may surface as opaque. |
 | `.supp` support bundle | ✅ browse | Same AES-128 key as `.unf`; no config DB, so the raw archive (logs, `support_info.json`, `devices/`) is shown for browsing. |
 | UniFi OS `.unifi` — plain-ZIP shapes | ✅ full support | Embedded `.unf`, or an inline unencrypted Network payload; parsed in place. |
-| UniFi OS `.unifi` — AES-256 console shape | ⚠️ detected, decryption key pending | The IV-prepended AES-256 → gzip → tar console container is recognised and its shape reported; the full extract pipeline is implemented but gated on a verified 32-byte key (see Limitations). |
+| UniFi OS `.unifi` — AES-256 console shape | ✅ full support | The IV-prepended AES-256 → gzip → tar console backup (Control Plane → System → Backups). The Network payload is extracted and parsed; the UCore PostgreSQL dump is kept raw for browsing. Key verified across four independent implementations. |
 | UniFi Protect `.ubv` | ❌ not a backup | Raw video files; we don't touch them. |
 
 ## Install
@@ -120,15 +120,10 @@ open /Applications/UnifiBackupInspector.app
 * **No restore / no writing.** The app is read-only; exports are one-way.
   Site-scoped round-trip (re-encrypting a modified backup) is feasible in
   principle (see `ROADMAP.md` §3.5) but not implemented here.
-* **AES-256 `.unifi` console backups: key pending.** The IV-prepended
-  AES-256 console container is detected and its shape reported, but the
-  32-byte static key is a **placeholder pending verification**
-  (`UnfCipher.unifiOSKey256`, gated by `unifiOSKey256Verified`). Until a
-  real console file confirms the exact bytes, this shape reports "key
-  pending verification" rather than decrypting with unverified bytes (a
-  wrong key silently yields garbage). Plain-ZIP `.unifi` files work today.
 * **UCore PostgreSQL not parsed.** Inside a console `.unifi`, the
-  `backup/ucore/` `pg_dump` is kept raw for browsing/export, not decoded.
+  `backup/ucore/` `pg_dump` (UniFi OS users, Protect/Access/Talk config)
+  is kept raw for browsing/export, not decoded. The Network payload
+  (`backup/network/`) is fully parsed.
 * **Statistics not loaded by default.** Use the Statistics view (or
   "Load statistics…") to decompress `db_stat.gz` / `stat_*.bson`. Large
   controllers' stat databases can be hundreds of MB; loading reuses the

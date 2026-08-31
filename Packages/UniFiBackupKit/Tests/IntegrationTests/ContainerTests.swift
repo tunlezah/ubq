@@ -3,8 +3,8 @@ import XCTest
 import UnfCrypto
 
 /// Container-shape detection tests: `.supp` support bundles (AES-128 → ZIP with
-/// no configuration DB) and the AES-256 UniFi OS console `.unifi` shape (whose
-/// key is a placeholder pending verification).
+/// no configuration DB) and the AES-256 UniFi OS console `.unifi` shape (key
+/// verified and enabled; a wrong-content file fails cleanly at the gzip check).
 ///
 /// (Does not touch the other files in this target — see SyntheticFixture /
 /// EndToEndTests.)
@@ -59,18 +59,21 @@ final class ContainerTests: XCTestCase {
 
     // MARK: - AES-256 UniFi OS console container
 
-    func testUnifiOSConsoleShapeReportsKeyPending() {
-        // 64 block-aligned bytes: not a plain ZIP, not AES-128-decryptable to a
-        // ZIP. With a `.unifi` extension this is treated as the AES-256 console
-        // shape, which reports "key pending verification" (placeholder key).
+    func testUnifiOSConsolePathEnabledRejectsNonGzip() {
+        // The AES-256 console path is enabled (key verified). 64 block-aligned
+        // bytes with a `.unifi` extension are attempted as the console shape:
+        // they decrypt to non-gzip garbage, so the loader fails cleanly — NOT
+        // with "pending verification", and never with silent garbage data.
         let blob = Data((0..<64).map { UInt8($0) })
         let url = URL(fileURLWithPath: "/private/tmp/example.unifi")
         XCTAssertThrowsError(try Backup.load(sourceURL: url, rawFileData: blob)) { err in
             guard case FatalBackupError.notAUniFiNetworkBackup(let detail) = err else {
                 return XCTFail("expected notAUniFiNetworkBackup, got \(err)")
             }
-            XCTAssertTrue(detail.contains("AES-256"), "detail should name the AES-256 shape: \(detail)")
-            XCTAssertTrue(detail.lowercased().contains("pending verification"), detail)
+            XCTAssertFalse(
+                detail.lowercased().contains("pending verification"),
+                "the console key is verified now, so it must not report pending: \(detail)"
+            )
         }
     }
 

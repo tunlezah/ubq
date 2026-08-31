@@ -32,8 +32,9 @@ Most of Tiers 1–2 and parts of Tier 3 below are now **implemented** on
   report, Restore Advisor, CSV export, editable LLM budgets (refreshed to
   Aug-2026 numbers) with split-into-N and Claude structured nesting.
 * **Tier 3 (partial)** — `.supp` support bundles (full), and `.unifi`
-  console (AES-256 → gzip → tar) container **detection + extract pipeline**
-  (see caveat).
+  console (AES-256 → gzip → tar) container **fully enabled** — the key is
+  verified (see below) and the Network payload is extracted and parsed;
+  the UCore Postgres dump is kept raw.
 
 **Two honest caveats:**
 
@@ -42,12 +43,15 @@ Most of Tiers 1–2 and parts of Tier 3 below are now **implemented** on
    **not compiler-verified**; the macOS CI is the gate. Expect the
    possibility of minor SwiftUI/Charts compile nits to shake out on the
    first CI run.
-2. **AES-256 `.unifi` key is a placeholder.** The console-container key
-   (`UnfCipher.unifiOSKey256`) could not be verified byte-for-byte, so it
-   ships as a placeholder gated by `unifiOSKey256Verified = false`. The
-   detect/gunzip/tar/parse pipeline is complete and activates the moment a
-   verified 32-byte key is pasted in and the flag flipped; until then the
-   shape is detected and reported rather than decrypted with bogus bytes.
+2. **AES-256 `.unifi` key — now verified and enabled.** The console-container
+   key (`UnfCipher.unifiOSKey256`) was confirmed byte-for-byte across four
+   independent implementations (EvilBit-Labs/unifi_extract, mr-r3b00t and
+   ShaunLeslie browser tools, and the UniHosted bundle), so
+   `unifiOSKey256Verified` is now `true` and the console path is live.
+   Independently of the key, a wrong key cannot corrupt data silently: the
+   loader validates the gzip magic (`1f 8b`) and must untar, so a bad key
+   fails cleanly. Real-file confirmation is a one-line local `openssl`
+   check (no upload) or simply opening a console `.unifi` in the app.
 
 Still open (Tier 3+): controller connectivity (§5), CLI/MCP server,
 site-export/sanitised write-back, UCore Postgres decoding, sign+notarise
