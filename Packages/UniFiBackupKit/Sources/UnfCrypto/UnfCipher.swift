@@ -16,26 +16,48 @@ public enum UnfCipher {
     public static let key: [UInt8] = Array("bcyangkmluohmars".utf8)
     public static let iv:  [UInt8] = Array("ubntenterpriseap".utf8)
 
-    /// AES-256 key for the UniFi OS **console** `.unifi` container (AES-256-CBC,
-    /// NoPadding, IV prepended as the first 16 bytes). Published in
-    /// EvilBit-Labs/unifi_extract's `DECRYPTION.md` as a 32-byte static key that
-    /// begins `e3 83 b7 c5 …` and ends `… 5d ce 98 5f` (see `/ROADMAP.md` §3.3).
+    /// Canonical hex of the AES-256 key for the UniFi OS **console** `.unifi`
+    /// container (AES-256-CBC, NoPadding, IV prepended as the first 16 bytes).
+    /// A single static key shared across all installations (obfuscation, not
+    /// confidentiality — like the `.unf` key).
     ///
-    /// TODO(key): the full 32 bytes could not be transcribed with certainty from
-    /// the source at implementation time, so this is a **PLACEHOLDER** (all
-    /// zeroes). It is deliberately never used to decrypt while
-    /// `unifiOSKey256Verified` is `false`, because a wrong key silently produces
-    /// garbage — worse than an unimplemented path. Before enabling the AES-256
-    /// console path: paste the verified 32 bytes here, confirm they decrypt a
-    /// real console-generated file to a `1f 8b` gzip stream, then flip
-    /// `unifiOSKey256Verified` to `true`.
-    public static let unifiOSKey256: [UInt8] = Array(repeating: 0, count: 32)
+    /// Verified **byte-for-byte across four independent implementations** (see
+    /// `/ROADMAP.md` §3.3): EvilBit-Labs/unifi_extract (`internal/crypto/crypto.go`
+    /// `UnifiKeyHex`), mr-r3b00t/unifi_backup_explorer (`UNIFI_V2_KEY_HEX`),
+    /// ShaunLeslie/unifi-backup-reader (`UNIFI_KEY_HEX`), and the UniHosted
+    /// Backup Explorer bundle. All four carry these exact 32 bytes; no source
+    /// contradicts them. Do not mutate without an ADR.
+    public static let unifiOSKey256Hex =
+        "e383b7c53698b36d4baea4ed22181ef73676bfd5d5b90005d9845ffd5dce985f"
 
-    /// Guards the AES-256 console path. Stays `false` until `unifiOSKey256`
-    /// holds the verified 32-byte key (see the TODO above). While `false`, the
-    /// loader reports "decryption key pending verification" instead of
-    /// decrypting with bogus bytes.
-    public static let unifiOSKey256Verified = false
+    /// The 32-byte AES-256 console key, decoded from `unifiOSKey256Hex` (the
+    /// hex string is the single source of truth to avoid transcription error).
+    public static let unifiOSKey256: [UInt8] = decodeHex(unifiOSKey256Hex)
+
+    /// Guards the AES-256 console path. `true` now that `unifiOSKey256` holds the
+    /// verified key. A wrong key cannot silently corrupt data regardless: the
+    /// loader validates the decrypted output starts with the gzip magic
+    /// (`1f 8b`) and must then untar, so a bad key fails cleanly rather than
+    /// producing garbage.
+    public static let unifiOSKey256Verified = true
+
+    /// Decodes an even-length hex string into bytes. Returns `[]` on any invalid
+    /// character or odd length (surfaced by the `count == 32` test guard).
+    static func decodeHex(_ s: String) -> [UInt8] {
+        let chars = Array(s)
+        guard chars.count % 2 == 0 else { return [] }
+        var out = [UInt8]()
+        out.reserveCapacity(chars.count / 2)
+        var i = 0
+        while i < chars.count {
+            guard let hi = chars[i].hexDigitValue, let lo = chars[i + 1].hexDigitValue else {
+                return []
+            }
+            out.append(UInt8(hi << 4 | lo))
+            i += 2
+        }
+        return out
+    }
 
     /// Decrypts a `.unf` ciphertext blob into a raw ZIP-bytes buffer (AES-128).
     ///
