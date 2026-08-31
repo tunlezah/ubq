@@ -2,6 +2,33 @@ import SwiftUI
 import AppKit
 import UniFiBackupKit
 
+/// A flat, cross-site view of one entity type, reachable from the sidebar
+/// Overview counts. These entities are otherwise nested under each site in the
+/// tree, so this gives the "show me all devices / WLANs / …" view users expect.
+enum EntityFilter: String, CaseIterable, Hashable {
+    case devices, wlans, networks, firewall, clients
+
+    var title: String {
+        switch self {
+        case .devices: "Devices"
+        case .wlans: "WLANs"
+        case .networks: "Networks"
+        case .firewall: "Firewall"
+        case .clients: "Clients"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .devices: "antenna.radiowaves.left.and.right"
+        case .wlans: "wifi"
+        case .networks: "network"
+        case .firewall: "shield"
+        case .clients: "person.2"
+        }
+    }
+}
+
 /// Top-level UI controller. Owns the loaded `Backup`, an optional second
 /// backup for diffing, selection/search state, and the async loading
 /// pipeline. Heavy tree walks are precomputed once per load into
@@ -28,8 +55,16 @@ final class InspectorController {
     // MARK: Selection
     var selectionMode: Bool = false
     var selectedNodeIDs: Set<String> = []
-    var selectedCategoryID: String?
+    var selectedCategoryID: String? {
+        // Choosing a structural category and applying a flat entity filter are
+        // mutually exclusive: selecting a category clears any active filter.
+        didSet { if selectedCategoryID != nil { entityFilter = nil } }
+    }
     var focusedNodeID: String?
+
+    /// Flat, cross-site "quick filter" by entity type (Devices, WLANs, …),
+    /// driven by the sidebar Overview rows. `nil` = show the selected category.
+    var entityFilter: EntityFilter?
 
     // MARK: Search
     var searchText: String = ""
@@ -214,6 +249,27 @@ final class InspectorController {
 
     func node(for id: String) -> TreeNode? { index.node(for: id) }
 
+    // MARK: - Entity quick-filter (flat, cross-site)
+
+    /// All nodes of a given entity kind across every site, in tree order.
+    var entityFilteredNodes: [TreeNode] {
+        guard let kind = entityFilter else { return [] }
+        return index.orderedIDs.compactMap { index.node(for: $0) }
+            .filter { Self.entityKind(of: $0) == kind }
+    }
+
+    /// Maps a tree node to the flat entity bucket it belongs to, if any.
+    static func entityKind(of node: TreeNode) -> EntityFilter? {
+        switch node {
+        case .device: .devices
+        case .wlan: .wlans
+        case .network: .networks
+        case .firewallRule, .firewallGroup, .portForward, .routing: .firewall
+        case .client: .clients
+        default: nil
+        }
+    }
+
     func toggle(_ node: TreeNode) {
         let willSelect = !selectedNodeIDs.contains(node.id)
         var affected = index.descendantIDs(of: node.id)
@@ -237,12 +293,27 @@ final class InspectorController {
 
     // MARK: - Cross-reference navigation
 
-    /// Reveals and focuses the record with the given id, switching the sidebar
-    /// category so it is on screen.
+    /// Reveals and focuses a record. Accepts either a `TreeNode.id` or a raw
+    /// UniFi record `_id` (cross-reference links and diff/audit "Reveal" pass the
+    /// raw id). Puts the target on screen: for a flat-filterable kind it switches
+    /// to that entity view (where the row is top-level and visible); otherwise it
+    /// selects the owning top-level category.
     func navigate(toId id: String) {
-        guard index.node(for: id) != nil else { return }
-        if let cat = index.topCategoryID(for: id) { selectedCategoryID = cat }
-        focusedNodeID = id
+        let nodeID: String
+        if index.node(for: id) != nil {
+            nodeID = id
+        } else if let mapped = index.nodeID(forRecordID: id) {
+            nodeID = mapped
+        } else {
+            return
+        }
+        if let node = index.node(for: nodeID), let kind = Self.entityKind(of: node) {
+            entityFilter = kind
+            selectedCategoryID = nil
+        } else if let cat = index.topCategoryID(for: nodeID) {
+            selectedCategoryID = cat   // didSet clears entityFilter
+        }
+        focusedNodeID = nodeID
     }
 
     // MARK: - Export
@@ -331,13 +402,17 @@ struct BackupIndex {
     private let descendants: [String: Set<String>]
     private let topCategory: [String: String]
     private let searchIndex: [String: String]
+    /// Maps a raw UniFi record `_id` to the owning `TreeNode.id`, so navigation
+    /// from a cross-reference / diff / audit (which speak raw record ids) can
+    /// resolve to the tree node.
+    private let recordToNode: [String: String]
     let orderedIDs: [String]
 
     static let empty = BackupIndex()
 
     private init() {
         nodesByID = [:]; descendants = [:]; topCategory = [:]
-        searchIndex = [:]; orderedIDs = []
+        searchIndex = [:]; recordToNode = [:]; orderedIDs = []
     }
 
     init(tree: [TreeNode]) {
@@ -345,6 +420,7 @@ struct BackupIndex {
         var descendants: [String: Set<String>] = [:]
         var topCategory: [String: String] = [:]
         var searchIndex: [String: String] = [:]
+        var recordToNode: [String: String] = [:]
         var ordered: [String] = []
 
         // Recursive walk that records nodes, ordering, per-node search text, the
@@ -362,6 +438,10 @@ struct BackupIndex {
             if let raw = node.rawDocument {
                 for (k, v) in raw.pairs {
                     text += " " + k.lowercased() + " " + v.displayString.lowercased()
+                }
+                let rid = raw.idString
+                if !rid.isEmpty, recordToNode[rid] == nil {
+                    recordToNode[rid] = node.id
                 }
             }
             searchIndex[node.id] = text
@@ -381,6 +461,7 @@ struct BackupIndex {
         self.descendants = descendants
         self.topCategory = topCategory
         self.searchIndex = searchIndex
+        self.recordToNode = recordToNode
         self.orderedIDs = ordered
     }
 
@@ -388,4 +469,5 @@ struct BackupIndex {
     func descendantIDs(of id: String) -> Set<String> { descendants[id] ?? [] }
     func topCategoryID(for id: String) -> String? { topCategory[id] }
     func searchText(for id: String) -> String? { searchIndex[id] }
+    func nodeID(forRecordID id: String) -> String? { recordToNode[id] }
 }

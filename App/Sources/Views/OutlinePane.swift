@@ -25,6 +25,9 @@ struct OutlinePane: View {
                 EmptyState()
             } else if let backup = controller.backup {
                 OutlineSearchField(text: $controller.searchText)
+                if let kind = controller.entityFilter {
+                    EntityFilterChip(kind: kind) { controller.entityFilter = nil }
+                }
                 if backup.isSupportBundle && backup.tree.isEmpty {
                     SupportBundleNote()
                 } else {
@@ -63,8 +66,11 @@ struct OutlinePane: View {
     private var topLevelNodes: [TreeNode] {
         guard let tree = controller.backup?.tree else { return [] }
         let base: [TreeNode]
-        if let selectedCat = controller.selectedCategoryID,
-           let match = tree.first(where: { $0.id == selectedCat }) {
+        if controller.entityFilter != nil {
+            // Flat, cross-site view of one entity type (from the Overview counts).
+            base = controller.entityFilteredNodes
+        } else if let selectedCat = controller.selectedCategoryID,
+                  let match = tree.first(where: { $0.id == selectedCat }) {
             base = TreeBuilder.children(of: match)
         } else {
             base = tree.flatMap { TreeBuilder.children(of: $0) }
@@ -198,6 +204,33 @@ private struct OutlineSearchField: View {
                 isFocused = false
             }
         }
+    }
+}
+
+/// Shows the active flat entity filter (e.g. "Devices") with a clear button,
+/// so it is obvious the middle pane is scoped and how to get back.
+private struct EntityFilterChip: View {
+    let kind: EntityFilter
+    var onClear: () -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: kind.symbol)
+                .foregroundStyle(.tint)
+            Text("All \(kind.title)")
+                .font(.caption.weight(.medium))
+            Spacer()
+            Button(action: onClear) {
+                Label("Clear", systemImage: "xmark.circle.fill")
+                    .labelStyle(.iconOnly)
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Clear filter")
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(.regularMaterial)
     }
 }
 
