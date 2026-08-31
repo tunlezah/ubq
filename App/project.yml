@@ -61,6 +61,13 @@ targets:
               - com.ubnt.unifi.os.backup
             CFBundleTypeExtensions:
               - unifi
+          - CFBundleTypeName: UniFi Support Bundle
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Default
+            LSItemContentTypes:
+              - com.ubnt.unifi.support.bundle
+            CFBundleTypeExtensions:
+              - supp
         UTImportedTypeDeclarations:
           - UTTypeIdentifier: com.ubnt.unifi.network.backup
             UTTypeDescription: UniFi Network Backup
@@ -76,6 +83,13 @@ targets:
             UTTypeTagSpecification:
               public.filename-extension:
                 - unifi
+          - UTTypeIdentifier: com.ubnt.unifi.support.bundle
+            UTTypeDescription: UniFi Support Bundle
+            UTTypeConformsTo:
+              - public.data
+            UTTypeTagSpecification:
+              public.filename-extension:
+                - supp
     entitlements:
       path: Resources/UnifiBackupInspector.entitlements
       properties:

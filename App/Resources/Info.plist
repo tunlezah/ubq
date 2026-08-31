@@ -62,6 +62,22 @@
                 <string>unifi</string>
             </array>
         </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>UniFi Support Bundle</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Default</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>com.ubnt.unifi.support.bundle</string>
+            </array>
+            <key>CFBundleTypeExtensions</key>
+            <array>
+                <string>supp</string>
+            </array>
+        </dict>
     </array>
     <key>UTImportedTypeDeclarations</key>
     <array>
@@ -96,6 +112,23 @@
                 <key>public.filename-extension</key>
                 <array>
                     <string>unifi</string>
+                </array>
+            </dict>
+        </dict>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>com.ubnt.unifi.support.bundle</string>
+            <key>UTTypeDescription</key>
+            <string>UniFi Support Bundle</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.data</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>supp</string>
                 </array>
             </dict>
         </dict>
