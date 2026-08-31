@@ -30,7 +30,11 @@ targets:
     platform: macOS
     sources:
       - Sources
-    resources:
+      # Asset catalog must live under `sources` — XcodeGen auto-classifies
+      # `.xcassets` as a resource and emits the Copy-Bundle-Resources phase
+      # so `actool` runs and produces Assets.car (the app icon). A separate
+      # `resources:` key is NOT honored here, which previously left the app
+      # with no Contents/Resources and failed the icon-verification CI step.
       - Resources/Assets.xcassets
     info:
       path: Resources/Info.plist
